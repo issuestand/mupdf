@@ -24,9 +24,14 @@
 #include "memento.h"
 
 #ifdef __APPLE__
-#define HAVE_SIGSETJMP
+#	define HAVE_SIGSETJMP
 #elif defined(__unix)
-#define HAVE_SIGSETJMP
+#	define HAVE_SIGSETJMP
+#	ifdef __ANDROID__
+#		if TARGET_ARCH_ABI == x86
+#			undef HAVE_SIGSETJMP
+#		endif
+#	endif
 #endif
 
 #ifdef __ANDROID__
