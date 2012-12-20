@@ -1,9 +1,11 @@
 package com.artifex.mupdf;
 
 import java.io.File;
-import java.io.FilenameFilter;
+import java.io.FileFilter;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.Map;
 
 import android.app.AlertDialog;
 import android.app.ListActivity;
@@ -17,15 +19,17 @@ import android.os.Environment;
 import android.os.FileObserver;
 import android.os.Handler;
 import android.view.View;
-import android.widget.ArrayAdapter;
 import android.widget.ListView;
 
 public class ChoosePDFActivity extends ListActivity {
-	private File         mDirectory;
+	static private File  mDirectory;
+	static private Map<String, Integer> mPositions = new HashMap<String, Integer>();
+	private File         mParent;
+	private File []      mDirs;
 	private File []      mFiles;
 	private Handler	     mHandler;
 	private Runnable     mUpdateFiles;
-	private ArrayAdapter<String> adapter;
+	private ChoosePDFAdapter adapter;
 
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
@@ -56,33 +60,45 @@ public class ChoosePDFActivity extends ListActivity {
 			return;
 		}
 
-	}
-
-	@Override
-	protected void onResume() {
-		super.onResume();
-
-		mDirectory = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+		if (mDirectory == null)
+			mDirectory = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
 
 		// Create a list adapter...
-		adapter = new ArrayAdapter<String>(this, R.layout.picker_entry);
+		adapter = new ChoosePDFAdapter(getLayoutInflater());
 		setListAdapter(adapter);
 
 		// ...that is updated dynamically when files are scanned
 		mHandler = new Handler();
 		mUpdateFiles = new Runnable() {
 			public void run() {
-				mFiles = mDirectory.listFiles(new FilenameFilter() {
-					public boolean accept(File file, String name) {
-						if (name.toLowerCase().endsWith(".pdf"))
+				mParent = mDirectory.getParentFile();
+
+				mDirs = mDirectory.listFiles(new FileFilter() {
+
+					public boolean accept(File file) {
+						return file.isDirectory();
+					}
+				});
+				if (mDirs == null)
+					mDirs = new File[0];
+
+				mFiles = mDirectory.listFiles(new FileFilter() {
+
+					public boolean accept(File file) {
+						if (file.isDirectory())
+							return false;
+						String fname = file.getName().toLowerCase();
+						if (fname.endsWith(".pdf"))
 							return true;
-						if (name.toLowerCase().endsWith(".xps"))
+						if (fname.endsWith(".xps"))
 							return true;
-						if (name.toLowerCase().endsWith(".cbz"))
+						if (fname.endsWith(".cbz"))
 							return true;
 						return false;
 					}
 				});
+				if (mFiles == null)
+					mFiles = new File[0];
 
 				Arrays.sort(mFiles, new Comparator<File>() {
 					public int compare(File arg0, File arg1) {
@@ -90,10 +106,21 @@ public class ChoosePDFActivity extends ListActivity {
 					}
 				});
 
+				Arrays.sort(mDirs, new Comparator<File>() {
+					public int compare(File arg0, File arg1) {
+						return arg0.getName().compareToIgnoreCase(arg1.getName());
+					}
+				});
+
 				adapter.clear();
-				if (mFiles != null)
-					for (File f : mFiles)
-						adapter.add(f.getName());
+				if (mParent != null)
+					adapter.add(new ChoosePDFItem(ChoosePDFItem.Type.PARENT, ".."));
+				for (File f : mDirs)
+					adapter.add(new ChoosePDFItem(ChoosePDFItem.Type.DIR, f.getName()));
+				for (File f : mFiles)
+					adapter.add(new ChoosePDFItem(ChoosePDFItem.Type.DOC, f.getName()));
+
+				lastPosition();
 			}
 		};
 
@@ -109,13 +136,44 @@ public class ChoosePDFActivity extends ListActivity {
 		observer.startWatching();
 	}
 
+	private void lastPosition() {
+		String p = mDirectory.getAbsolutePath();
+		if (mPositions.containsKey(p))
+			getListView().setSelection(mPositions.get(p));
+	}
+
 	@Override
 	protected void onListItemClick(ListView l, View v, int position, long id) {
 		super.onListItemClick(l, v, position, id);
+
+		mPositions.put(mDirectory.getAbsolutePath(), getListView().getFirstVisiblePosition());
+
+		if (position < (mParent == null ? 0 : 1)) {
+			mDirectory = mParent;
+			mHandler.post(mUpdateFiles);
+			return;
+		}
+
+		position -= (mParent == null ? 0 : 1);
+
+		if (position < mDirs.length) {
+			mDirectory = mDirs[position];
+			mHandler.post(mUpdateFiles);
+			return;
+		}
+
+		position -= mDirs.length;
+
 		Uri uri = Uri.parse(mFiles[position].getAbsolutePath());
 		Intent intent = new Intent(this,MuPDFActivity.class);
 		intent.setAction(Intent.ACTION_VIEW);
 		intent.setData(uri);
 		startActivity(intent);
+	}
+
+	@Override
+	protected void onPause() {
+		super.onPause();
+		mPositions.put(mDirectory.getAbsolutePath(), getListView().getFirstVisiblePosition());
 	}
 }
