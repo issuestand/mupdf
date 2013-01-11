@@ -56,6 +56,8 @@ struct pdf_write_options_s
 	int *ofs_list;
 	int *gen_list;
 	int *renumber_map;
+	int continue_on_error;
+	int *errors;
 	/* The following extras are required for linearization */
 	int *rev_renumber_map;
 	int *rev_gen_list;
@@ -791,7 +793,7 @@ mark_all(pdf_document *xref, pdf_write_options *opts, pdf_obj *val, int flag, in
 {
 	fz_context *ctx = xref->ctx;
 
-	if (pdf_dict_mark(val))
+	if (pdf_obj_mark(val))
 		return;
 
 	fz_try(ctx)
@@ -829,7 +831,7 @@ mark_all(pdf_document *xref, pdf_write_options *opts, pdf_obj *val, int flag, in
 	}
 	fz_always(ctx)
 	{
-		pdf_dict_unmark(val);
+		pdf_obj_unmark(val);
 	}
 	fz_catch(ctx)
 	{
@@ -842,7 +844,7 @@ mark_pages(pdf_document *xref, pdf_write_options *opts, pdf_obj *val, int pagenu
 {
 	fz_context *ctx = xref->ctx;
 
-	if (pdf_dict_mark(val))
+	if (pdf_obj_mark(val))
 		return pagenum;
 
 	fz_try(ctx)
@@ -852,7 +854,7 @@ mark_pages(pdf_document *xref, pdf_write_options *opts, pdf_obj *val, int pagenu
 			if (!strcmp("Page", pdf_to_name(pdf_dict_gets(val, "Type"))))
 			{
 				int num = pdf_to_num(val);
-				pdf_dict_unmark(val);
+				pdf_obj_unmark(val);
 				mark_all(xref, opts, val, pagenum == 0 ? USE_PAGE1 : (pagenum<<USE_PAGE_SHIFT), pagenum);
 				page_objects_list_set_page_object(ctx, opts, pagenum, num);
 				pagenum++;
@@ -897,7 +899,7 @@ mark_pages(pdf_document *xref, pdf_write_options *opts, pdf_obj *val, int pagenu
 	}
 	fz_always(ctx)
 	{
-		pdf_dict_unmark(val);
+		pdf_obj_unmark(val);
 	}
 	fz_catch(ctx)
 	{
@@ -912,7 +914,7 @@ mark_root(pdf_document *xref, pdf_write_options *opts, pdf_obj *dict)
 	fz_context *ctx = xref->ctx;
 	int i, n = pdf_dict_len(dict);
 
-	if (pdf_dict_mark(dict))
+	if (pdf_obj_mark(dict))
 		return;
 
 	fz_try(ctx)
@@ -943,7 +945,7 @@ mark_root(pdf_document *xref, pdf_write_options *opts, pdf_obj *dict)
 	}
 	fz_always(ctx)
 	{
-		pdf_dict_unmark(dict);
+		pdf_obj_unmark(dict);
 	}
 	fz_catch(ctx)
 	{
@@ -957,7 +959,7 @@ mark_trailer(pdf_document *xref, pdf_write_options *opts, pdf_obj *dict)
 	fz_context *ctx = xref->ctx;
 	int i, n = pdf_dict_len(dict);
 
-	if (pdf_dict_mark(dict))
+	if (pdf_obj_mark(dict))
 		return;
 
 	fz_try(ctx)
@@ -975,7 +977,7 @@ mark_trailer(pdf_document *xref, pdf_write_options *opts, pdf_obj *dict)
 	}
 	fz_always(ctx)
 	{
-		pdf_dict_unmark(dict);
+		pdf_obj_unmark(dict);
 	}
 	fz_catch(ctx)
 	{
@@ -1166,7 +1168,7 @@ lpr(fz_context *ctx, pdf_obj *node, int depth, int page)
 	pdf_obj *o = NULL;
 	int i, n;
 
-	if (pdf_dict_mark(node))
+	if (pdf_obj_mark(node))
 		return page;
 
 	fz_var(o);
@@ -1231,7 +1233,7 @@ lpr(fz_context *ctx, pdf_obj *node, int depth, int page)
 		fz_rethrow(ctx);
 	}
 
-	pdf_dict_unmark(node);
+	pdf_obj_unmark(node);
 
 	return page;
 }
@@ -1509,8 +1511,11 @@ static void expandstream(pdf_document *xref, pdf_write_options *opts, pdf_obj *o
 	fz_context *ctx = xref->ctx;
 	int orig_num = opts->rev_renumber_map[num];
 	int orig_gen = opts->rev_gen_list[num];
+	int truncated = 0;
 
-	buf = pdf_load_renumbered_stream(xref, num, gen, orig_num, orig_gen);
+	buf = pdf_load_renumbered_stream(xref, num, gen, orig_num, orig_gen, (opts->continue_on_error ? &truncated : NULL));
+	if (truncated && opts->errors)
+		(*opts->errors)++;
 
 	obj = pdf_copy_dict(ctx, obj_orig);
 	pdf_dict_dels(obj, "Filter");
@@ -1573,7 +1578,23 @@ static void writeobject(pdf_document *xref, pdf_write_options *opts, int num, in
 	pdf_obj *type;
 	fz_context *ctx = xref->ctx;
 
-	obj = pdf_load_object(xref, num, gen);
+	fz_try(ctx)
+	{
+		obj = pdf_load_object(xref, num, gen);
+	}
+	fz_catch(ctx)
+	{
+		if (opts->continue_on_error)
+		{
+			fprintf(opts->out, "%d %d obj\nnull\nendobj\n", num, gen);
+			if (opts->errors)
+				(*opts->errors)++;
+			fz_warn(ctx, "%s", fz_caught(ctx));
+			return;
+		}
+		else
+			fz_rethrow(ctx);
+	}
 
 	/* skip ObjStm and XRef objects */
 	if (pdf_is_dict(obj))
@@ -1634,10 +1655,28 @@ static void writeobject(pdf_document *xref, pdf_write_options *opts, int num, in
 			if (pdf_dict_gets(obj, "Width") != NULL && pdf_dict_gets(obj, "Height") != NULL)
 				dontexpand = !(opts->do_expand & fz_expand_images);
 		}
-		if (opts->do_expand && !dontexpand && !pdf_is_jpx_image(ctx, obj))
-			expandstream(xref, opts, obj, num, gen);
-		else
-			copystream(xref, opts, obj, num, gen);
+		fz_try(ctx)
+		{
+			if (opts->do_expand && !dontexpand && !pdf_is_jpx_image(ctx, obj))
+				expandstream(xref, opts, obj, num, gen);
+			else
+				copystream(xref, opts, obj, num, gen);
+		}
+		fz_catch(ctx)
+		{
+			if (opts->continue_on_error)
+			{
+				fprintf(opts->out, "%d %d obj\nnull\nendobj\n", num, gen);
+				if (opts->errors)
+					(*opts->errors)++;
+				fz_warn(ctx, "%s", fz_caught(ctx));
+			}
+			else
+			{
+				pdf_drop_obj(obj);
+				fz_rethrow(ctx);
+			}
+		}
 	}
 
 	pdf_drop_obj(obj);
@@ -2148,6 +2187,8 @@ void pdf_write_document(pdf_document *xref, char *filename, fz_write_options *fz
 		opts.renumber_map = fz_malloc_array(ctx, xref->len + 3, sizeof(int));
 		opts.rev_renumber_map = fz_malloc_array(ctx, xref->len + 3, sizeof(int));
 		opts.rev_gen_list = fz_malloc_array(ctx, xref->len + 3, sizeof(int));
+		opts.continue_on_error = fz_opts->continue_on_error;
+		opts.errors = fz_opts->errors;
 
 		for (num = 0; num < xref->len; num++)
 		{
