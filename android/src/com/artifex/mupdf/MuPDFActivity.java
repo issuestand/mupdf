@@ -2,6 +2,9 @@ package com.artifex.mupdf;
 
 import java.util.concurrent.Executor;
 
+import android.animation.Animator;
+import android.animation.AnimatorInflater;
+import android.animation.AnimatorSet;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.ProgressDialog;
@@ -32,7 +35,7 @@ import android.widget.ImageButton;
 import android.widget.RelativeLayout;
 import android.widget.SeekBar;
 import android.widget.TextView;
-import android.widget.ViewSwitcher;
+import android.widget.ViewAnimator;
 
 class ThreadPerTaskExecutor implements Executor {
 	public void execute(Runnable r) {
@@ -94,10 +97,14 @@ public class MuPDFActivity extends Activity
 	private SeekBar      mPageSlider;
 	private int          mPageSliderRes;
 	private TextView     mPageNumberView;
+	private TextView     mInfoView;
 	private ImageButton  mSearchButton;
+	private ImageButton mSelectButton;
+	private ImageButton mCancelSelectButton;
+	private ImageButton mCopySelectButton;
 	private ImageButton  mCancelButton;
 	private ImageButton  mOutlineButton;
-	private ViewSwitcher mTopBarSwitcher;
+	private ViewAnimator mTopBarSwitcher;
 	private ImageButton  mLinkButton;
 	private boolean      mTopBarIsSearch;
 	private ImageButton  mSearchBack;
@@ -107,6 +114,7 @@ public class MuPDFActivity extends Activity
 	//private SearchTaskResult mSearchTaskResult;
 	private AlertDialog.Builder mAlertBuilder;
 	private boolean    mLinkHighlight = false;
+	private boolean mSelecting = false;
 	private final Handler mHandler = new Handler();
 	private boolean mAlertsActive= false;
 	private AsyncTask<Void,Void,MuPDFAlert> mAlertTask;
@@ -343,52 +351,65 @@ public class MuPDFActivity extends Activity
 			private boolean showButtonsDisabled;
 
 			public boolean onSingleTapUp(MotionEvent e) {
-				if (!showButtonsDisabled) {
+				LinkInfo link = null;
+
+				if (!mSelecting && !showButtonsDisabled) {
 					MuPDFPageView pageView = (MuPDFPageView) mDocView.getDisplayedView();
 					if (MuPDFCore.javascriptSupported() && pageView.passClickEvent(e.getX(), e.getY())) {
 						// If the page consumes the event do nothing else
+					} else if (mLinkHighlight && pageView != null && (link = pageView.hitLink(e.getX(), e.getY())) != null) {
+						link.acceptVisitor(new LinkInfoVisitor() {
+							@Override
+							public void visitInternal(LinkInfoInternal li) {
+								// Clicked on an internal (GoTo) link
+								mDocView.setDisplayedViewIndex(li.pageNumber);
+							}
+
+							@Override
+							public void visitExternal(LinkInfoExternal li) {
+								Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(li.url));
+								startActivity(intent);
+							}
+
+							@Override
+							public void visitRemote(LinkInfoRemote li) {
+								// Clicked on a remote (GoToR) link
+							}
+						});
 					} else if (e.getX() < super.getWidth()/TAP_PAGE_MARGIN) {
 						super.moveToPrevious();
 					} else if (e.getX() > super.getWidth()*(TAP_PAGE_MARGIN-1)/TAP_PAGE_MARGIN) {
 						super.moveToNext();
+					} else if (!mButtonsVisible) {
+						showButtons();
 					} else {
-						LinkInfo link = null;
-						if (mLinkHighlight && pageView != null) {
-							link = pageView.hitLink(e.getX(), e.getY());
-						}
-						if (link != null) {
-							link.acceptVisitor(new LinkInfoVisitor() {
-								@Override
-								public void visitInternal(LinkInfoInternal li) {
-									// Clicked on an internal (GoTo) link
-									mDocView.setDisplayedViewIndex(li.pageNumber);
-								}
-								@Override
-								public void visitExternal(LinkInfoExternal li) {
-									// Clicked on an external (URI) link: li.url
-								}
-								@Override
-								public void visitRemote(LinkInfoRemote li) {
-									// Clicked on a remote (GoToR) link
-								}
-							});
-						} else {
-							if (!mButtonsVisible) {
-								showButtons();
-							} else {
-								hideButtons();
-							}
-						}
+						hideButtons();
 					}
 				}
 				return super.onSingleTapUp(e);
 			}
 
 			public boolean onScroll(MotionEvent e1, MotionEvent e2, float distanceX, float distanceY) {
-				if (!showButtonsDisabled)
-					hideButtons();
+				if (!mSelecting) {
+					if (!showButtonsDisabled)
+						hideButtons();
 
-				return super.onScroll(e1, e2, distanceX, distanceY);
+					return super.onScroll(e1, e2, distanceX, distanceY);
+				} else {
+					MuPDFPageView pageView = (MuPDFPageView) mDocView.getDisplayedView();
+					if (pageView != null)
+						pageView.selectText(e1.getX(), e1.getY(), e2.getX(), e2.getY());
+					return true;
+				}
+			}
+
+			@Override
+			public boolean onFling(MotionEvent e1, MotionEvent e2,
+					float velocityX, float velocityY) {
+				if (!mSelecting)
+					return super.onFling(e1, e2, velocityX, velocityY);
+				else
+					return true;
 			}
 
 			public boolean onScaleBegin(ScaleGestureDetector d) {
@@ -486,6 +507,55 @@ public class MuPDFActivity extends Activity
 		mSearchButton.setOnClickListener(new View.OnClickListener() {
 			public void onClick(View v) {
 				searchModeOn();
+			}
+		});
+
+		// Activate the select button
+		mSelectButton.setOnClickListener(new View.OnClickListener() {
+			public void onClick(View v) {
+				mSelecting = true;
+				mTopBarSwitcher.setDisplayedChild(2);
+			}
+		});
+
+		mCancelSelectButton.setOnClickListener(new View.OnClickListener() {
+			public void onClick(View v) {
+				PageView pageView = (PageView) mDocView.getDisplayedView();
+				if (pageView != null)
+					pageView.deselectText();
+				mSelecting = false;
+				mTopBarSwitcher.setDisplayedChild(0);
+			}
+		});
+
+		final Context context = this;
+		mCopySelectButton.setOnClickListener(new View.OnClickListener() {
+			public void onClick(View v) {
+				PageView pageView = (PageView) mDocView.getDisplayedView();
+				boolean copied = false;
+				if (pageView != null)
+					copied = pageView.copySelection();
+				mSelecting = false;
+				mTopBarSwitcher.setDisplayedChild(0);
+				mInfoView.setText(copied?"Copied to clipboard":"No text selected");
+				AnimatorSet set = (AnimatorSet) AnimatorInflater.loadAnimator(context, R.animator.info);
+				set.setTarget(mInfoView);
+				set.addListener(new Animator.AnimatorListener() {
+					public void onAnimationStart(Animator animation) {
+						mInfoView.setVisibility(View.VISIBLE);
+					}
+
+					public void onAnimationRepeat(Animator animation) {
+					}
+
+					public void onAnimationEnd(Animator animation) {
+						mInfoView.setVisibility(View.INVISIBLE);
+					}
+
+					public void onAnimationCancel(Animator animation) {
+					}
+				});
+				set.start();
 			}
 		});
 
@@ -748,7 +818,7 @@ public class MuPDFActivity extends Activity
 			//Focus on EditTextWidget
 			mSearchText.requestFocus();
 			showKeyboard();
-			mTopBarSwitcher.showNext();
+			mTopBarSwitcher.setDisplayedChild(1);
 		}
 	}
 
@@ -756,7 +826,7 @@ public class MuPDFActivity extends Activity
 		if (mTopBarIsSearch) {
 			mTopBarIsSearch = false;
 			hideKeyboard();
-			mTopBarSwitcher.showPrevious();
+			mTopBarSwitcher.setDisplayedChild(0);
 			SearchTaskResult.set(null);
 			// Make the ReaderView act on the change to mSearchTaskResult
 			// via overridden onChildSetup method.
@@ -775,16 +845,21 @@ public class MuPDFActivity extends Activity
 		mFilenameView = (TextView)mButtonsView.findViewById(R.id.docNameText);
 		mPageSlider = (SeekBar)mButtonsView.findViewById(R.id.pageSlider);
 		mPageNumberView = (TextView)mButtonsView.findViewById(R.id.pageNumber);
+		mInfoView = (TextView)mButtonsView.findViewById(R.id.info);
 		mSearchButton = (ImageButton)mButtonsView.findViewById(R.id.searchButton);
+		mSelectButton = (ImageButton)mButtonsView.findViewById(R.id.selectButton);
+		mCancelSelectButton = (ImageButton)mButtonsView.findViewById(R.id.cancelSelectButton);
+		mCopySelectButton = (ImageButton)mButtonsView.findViewById(R.id.copySelectButton);
 		mCancelButton = (ImageButton)mButtonsView.findViewById(R.id.cancel);
 		mOutlineButton = (ImageButton)mButtonsView.findViewById(R.id.outlineButton);
-		mTopBarSwitcher = (ViewSwitcher)mButtonsView.findViewById(R.id.switcher);
+		mTopBarSwitcher = (ViewAnimator)mButtonsView.findViewById(R.id.switcher);
 		mSearchBack = (ImageButton)mButtonsView.findViewById(R.id.searchBack);
 		mSearchFwd = (ImageButton)mButtonsView.findViewById(R.id.searchForward);
 		mSearchText = (EditText)mButtonsView.findViewById(R.id.searchText);
 		mLinkButton = (ImageButton)mButtonsView.findViewById(R.id.linkButton);
 		mTopBarSwitcher.setVisibility(View.INVISIBLE);
 		mPageNumberView.setVisibility(View.INVISIBLE);
+		mInfoView.setVisibility(View.INVISIBLE);
 		mPageSlider.setVisibility(View.INVISIBLE);
 	}
 
