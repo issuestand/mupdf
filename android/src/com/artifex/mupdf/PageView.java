@@ -102,7 +102,7 @@ public abstract class PageView extends ViewGroup {
 	private static final int PROGRESS_DIALOG_DELAY = 200;
 	private final Context   mContext;
 	protected     int       mPageNumber;
-	private       Point     mParentSize;
+	protected     Point     mParentSize;
 	protected     Point     mSize;   // Size of page at minimum zoom
 	protected     float     mSourceScale;
 
@@ -350,6 +350,14 @@ public abstract class PageView extends ViewGroup {
 		mHighlightLinks = f;
 		if (mSearchView != null)
 			mSearchView.invalidate();
+	}
+
+	public Point getParentSize() {
+		return mParentSize;
+	}
+
+	public void setParentSize(Point mParentSize) {
+		this.mParentSize = mParentSize;
 	}
 
 	public void deselectText() {
