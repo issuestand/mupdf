@@ -1,4 +1,4 @@
-package com.artifex.mupdf;
+package com.artifex.mupdfdemo;
 
 import android.graphics.Bitmap;
 
@@ -13,6 +13,10 @@ public class BitmapHolder {
 		if (bm != null && bm != abm)
 			bm.recycle();
 		bm = abm;
+	}
+
+	public synchronized void drop() {
+		bm = null;
 	}
 
 	public synchronized Bitmap getBm() {

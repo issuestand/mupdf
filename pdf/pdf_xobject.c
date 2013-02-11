@@ -60,11 +60,11 @@ pdf_load_xobject(pdf_document *xref, pdf_obj *dict)
 	fz_try(ctx)
 	{
 		obj = pdf_dict_gets(dict, "BBox");
-		form->bbox = pdf_to_rect(ctx, obj);
+		pdf_to_rect(ctx, obj, &form->bbox);
 
 		obj = pdf_dict_gets(dict, "Matrix");
 		if (obj)
-			form->matrix = pdf_to_matrix(ctx, obj);
+			pdf_to_matrix(ctx, obj, &form->matrix);
 		else
 			form->matrix = fz_identity;
 
@@ -111,7 +111,7 @@ pdf_load_xobject(pdf_document *xref, pdf_obj *dict)
 }
 
 pdf_obj *
-pdf_new_xobject(pdf_document *xref, fz_rect *bbox, fz_matrix *mat)
+pdf_new_xobject(pdf_document *xref, const fz_rect *bbox, const fz_matrix *mat)
 {
 	int idict_num;
 	pdf_obj *idict = NULL;
@@ -226,25 +226,8 @@ pdf_new_xobject(pdf_document *xref, fz_rect *bbox, fz_matrix *mat)
 
 void pdf_update_xobject_contents(pdf_document *xref, pdf_xobject *form, fz_buffer *buffer)
 {
-	fz_context *ctx = xref->ctx;
-	pdf_obj *len = NULL;
-
-	fz_var(len);
-
-	fz_try(ctx)
-	{
-		len = pdf_new_int(ctx, buffer->len);
-		pdf_dict_dels(form->contents, "Filter");
-		pdf_dict_puts(form->contents, "Length", len);
-		pdf_update_stream(xref, pdf_to_num(form->contents), buffer);
-		form->iteration ++;
-	}
-	fz_always(ctx)
-	{
-		pdf_drop_obj(len);
-	}
-	fz_catch(ctx)
-	{
-		fz_rethrow(ctx);
-	}
+	pdf_dict_dels(form->contents, "Filter");
+	pdf_dict_puts_drop(form->contents, "Length", pdf_new_int(xref->ctx, buffer->len));
+	pdf_update_stream(xref, pdf_to_num(form->contents), buffer);
+	form->iteration ++;
 }

@@ -23,7 +23,6 @@
 			>
 			<Tool
 				Name="VCPreBuildEventTool"
-				Description=""
 				CommandLine=""
 			/>
 			<Tool
@@ -251,6 +250,10 @@
 			</File>
 			<File
 				RelativePath="..\pdf\pdf_crypt.c"
+				>
+			</File>
+			<File
+				RelativePath="..\pdf\pdf_device.c"
 				>
 			</File>
 			<File
@@ -574,6 +577,10 @@
 				>
 			</File>
 			<File
+				RelativePath="..\fitz\stm_output.c"
+				>
+			</File>
+			<File
 				RelativePath="..\fitz\stm_read.c"
 				>
 			</File>
@@ -625,6 +632,10 @@
 		<Filter
 			Name="xps"
 			>
+			<File
+				RelativePath="..\xps\muxps-internal.h"
+				>
+			</File>
 			<File
 				RelativePath="..\xps\muxps.h"
 				>

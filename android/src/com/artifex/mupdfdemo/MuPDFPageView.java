@@ -1,8 +1,9 @@
-package com.artifex.mupdf;
+package com.artifex.mupdfdemo;
 
 import android.app.AlertDialog;
 import android.content.Context;
 import android.content.DialogInterface;
+import android.graphics.Bitmap;
 import android.graphics.Point;
 import android.graphics.PointF;
 import android.graphics.RectF;
@@ -54,7 +55,7 @@ class PassClickResultChoice extends PassClickResult {
 	}
 }
 
-public class MuPDFPageView extends PageView {
+public class MuPDFPageView extends PageView implements MuPDFView {
 	private final MuPDFCore mCore;
 	private AsyncTask<Void,Void,PassClickResult> mPassClick;
 	private RectF mWidgetAreas[];
@@ -200,15 +201,15 @@ public class MuPDFPageView extends PageView {
 	}
 
 	@Override
-	protected void drawPage(BitmapHolder h, int sizeX, int sizeY,
+	protected Bitmap drawPage(int sizeX, int sizeY,
 			int patchX, int patchY, int patchWidth, int patchHeight) {
-		mCore.drawPage(h, mPageNumber, sizeX, sizeY, patchX, patchY, patchWidth, patchHeight);
+		return mCore.drawPage(mPageNumber, sizeX, sizeY, patchX, patchY, patchWidth, patchHeight);
 	}
 
 	@Override
-	protected void updatePage(BitmapHolder h, int sizeX, int sizeY,
+	protected Bitmap updatePage(BitmapHolder h, int sizeX, int sizeY,
 			int patchX, int patchY, int patchWidth, int patchHeight) {
-		mCore.updatePage(h, mPageNumber, sizeX, sizeY, patchX, patchY, patchWidth, patchHeight);
+		return mCore.updatePage(h, mPageNumber, sizeX, sizeY, patchX, patchY, patchWidth, patchHeight);
 	}
 
 	@Override
@@ -219,6 +220,11 @@ public class MuPDFPageView extends PageView {
 	@Override
 	protected TextWord[][] getText() {
 		return mCore.textLines(mPageNumber);
+	}
+
+	@Override
+	protected void addStrikeOut(RectF[] lines) {
+		mCore.addStrikeOutAnnotation(mPageNumber, lines);
 	}
 
 	@Override
@@ -238,5 +244,10 @@ public class MuPDFPageView extends PageView {
 		mLoadWidgetAreas.execute();
 
 		super.setPage(page, size);
+	}
+
+	public void setScale(float scale) {
+		// This type of view scales automatically to fit the size
+		// determined by the parent view groups during layout
 	}
 }

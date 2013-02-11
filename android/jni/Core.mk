@@ -82,6 +82,7 @@ LOCAL_SRC_FILES := \
 	$(MY_ROOT)/fitz/stm_buffer.c \
 	$(MY_ROOT)/fitz/stm_comp_buf.c \
 	$(MY_ROOT)/fitz/stm_open.c \
+	$(MY_ROOT)/fitz/stm_output.c \
 	$(MY_ROOT)/fitz/stm_read.c \
 	$(MY_ROOT)/draw/draw_affine.c \
 	$(MY_ROOT)/draw/draw_blend.c \
@@ -100,6 +101,7 @@ LOCAL_SRC_FILES := \
 	$(MY_ROOT)/pdf/pdf_cmap_table.c \
 	$(MY_ROOT)/pdf/pdf_colorspace.c \
 	$(MY_ROOT)/pdf/pdf_crypt.c \
+	$(MY_ROOT)/pdf/pdf_device.c \
 	$(MY_ROOT)/pdf/pdf_encoding.c \
 	$(MY_ROOT)/pdf/pdf_event.c \
 	$(MY_ROOT)/pdf/pdf_font.c \

@@ -1,4 +1,4 @@
-package com.artifex.mupdf;
+package com.artifex.mupdfdemo;
 
 import java.util.LinkedList;
 import java.util.NoSuchElementException;
@@ -7,6 +7,7 @@ import android.content.Context;
 import android.graphics.Point;
 import android.graphics.Rect;
 import android.util.AttributeSet;
+import android.util.Log;
 import android.util.SparseArray;
 import android.view.GestureDetector;
 import android.view.MotionEvent;
@@ -31,6 +32,7 @@ public class ReaderView extends AdapterView<Adapter>
 
 	private static final float MIN_SCALE        = 1.0f;
 	private static final float MAX_SCALE        = 5.0f;
+	private static final float REFLOW_SCALE_FACTOR = 0.5f;
 
 	private Adapter           mAdapter;
 	private int               mCurrent;    // Adapter's index for the current view
@@ -46,6 +48,7 @@ public class ReaderView extends AdapterView<Adapter>
 	private float             mScale     = 1.0f;
 	private int               mXScroll;    // Scroll amounts recorded from events.
 	private int               mYScroll;    // and then accounted for in onLayout
+	private boolean           mReflow = false;
 	private final GestureDetector
 				  mGestureDetector;
 	private final ScaleGestureDetector
@@ -105,6 +108,177 @@ public class ReaderView extends AdapterView<Adapter>
 			slideViewOntoScreen(v);
 	}
 
+	// When advancing down the page, we want to advance by about
+	// 90% of a screenful. But we'd be happy to advance by between
+	// 80% and 95% if it means we hit the bottom in a whole number
+	// of steps.
+	private int smartAdvanceAmount(int screenHeight, int max) {
+		int advance = (int)(screenHeight * 0.9 + 0.5);
+		int leftOver = max % advance;
+		int steps = max / advance;
+		if (leftOver == 0) {
+			// We'll make it exactly. No adjustment
+		} else if ((float)leftOver / steps <= screenHeight * 0.05) {
+			// We can adjust up by less than 5% to make it exact.
+			advance += (int)((float)leftOver/steps + 0.5);
+		} else {
+			int overshoot = advance - leftOver;
+			if ((float)overshoot / steps <= screenHeight * 0.1) {
+				// We can adjust down by less than 10% to make it exact.
+				advance -= (int)((float)overshoot/steps + 0.5);
+			}
+		}
+		if (advance > max)
+			advance = max;
+		return advance;
+	}
+
+	public void smartMoveForwards() {
+		View v = mChildViews.get(mCurrent);
+		if (v == null)
+			return;
+
+		// The following code works in terms of where the screen is on the views;
+		// so for example, if the currentView is at (-100,-100), the visible
+		// region would be at (100,100). If the previous page was (2000, 3000) in
+		// size, the visible region of the previous page might be (2100 + GAP, 100)
+		// (i.e. off the previous page). This is different to the way the rest of
+		// the code in this file is written, but it's easier for me to think about.
+		// At some point we may refactor this to fit better with the rest of the
+		// code.
+
+		// screenWidth/Height are the actual width/height of the screen. e.g. 480/800
+		int screenWidth  = getWidth();
+		int screenHeight = getHeight();
+		// We might be mid scroll; we want to calculate where we scroll to based on
+		// where this scroll would end, not where we are now (to allow for people
+		// bashing 'forwards' very fast.
+		int remainingX = mScroller.getFinalX() - mScroller.getCurrX();
+		int remainingY = mScroller.getFinalY() - mScroller.getCurrY();
+		// right/bottom is in terms of pixels within the scaled document; e.g. 1000
+		int top = -(v.getTop()  + mYScroll + remainingY);
+		int right  = screenWidth -(v.getLeft() + mXScroll + remainingX);
+		int bottom = screenHeight+top;
+		// docWidth/Height are the width/height of the scaled document e.g. 2000x3000
+		int docWidth  = v.getMeasuredWidth();
+		int docHeight = v.getMeasuredHeight();
+
+		int xOffset, yOffset;
+		if (bottom >= docHeight) {
+			// We are flush with the bottom. Advance to next column.
+			if (right + screenWidth > docWidth) {
+				// No room for another column - go to next page
+				View nv = mChildViews.get(mCurrent+1);
+				if (nv == null) // No page to advance to
+					return;
+				int nextTop  = -(nv.getTop() + mYScroll + remainingY);
+				int nextLeft = -(nv.getLeft() + mXScroll + remainingX);
+				int nextDocWidth = nv.getMeasuredWidth();
+				int nextDocHeight = nv.getMeasuredHeight();
+
+				// Allow for the next page maybe being shorter than the screen is high
+				yOffset = (nextDocHeight < screenHeight ? ((nextDocHeight - screenHeight)>>1) : 0);
+
+				if (nextDocWidth < screenWidth) {
+					// Next page is too narrow to fill the screen. Scroll to the top, centred.
+					xOffset = (nextDocWidth - screenWidth)>>1;
+				} else {
+					// Reset X back to the left hand column
+					xOffset = right % screenWidth;
+					// Adjust in case the previous page is less wide
+					if (xOffset + screenWidth > nextDocWidth)
+						xOffset = nextDocWidth - screenWidth;
+				}
+				xOffset -= nextLeft;
+				yOffset -= nextTop;
+			} else {
+				// Move to top of next column
+				xOffset = screenWidth;
+				yOffset = screenHeight - bottom;
+			}
+		} else {
+			// Advance by 90% of the screen height downwards (in case lines are partially cut off)
+			xOffset = 0;
+			yOffset = smartAdvanceAmount(screenHeight, docHeight - bottom);
+		}
+		mScrollerLastX = mScrollerLastY = 0;
+		mScroller.startScroll(0, 0, remainingX - xOffset, remainingY - yOffset, 400);
+		post(this);
+	}
+
+	public void smartMoveBackwards() {
+		View v = mChildViews.get(mCurrent);
+		if (v == null)
+			return;
+
+		// The following code works in terms of where the screen is on the views;
+		// so for example, if the currentView is at (-100,-100), the visible
+		// region would be at (100,100). If the previous page was (2000, 3000) in
+		// size, the visible region of the previous page might be (2100 + GAP, 100)
+		// (i.e. off the previous page). This is different to the way the rest of
+		// the code in this file is written, but it's easier for me to think about.
+		// At some point we may refactor this to fit better with the rest of the
+		// code.
+
+		// screenWidth/Height are the actual width/height of the screen. e.g. 480/800
+		int screenWidth  = getWidth();
+		int screenHeight = getHeight();
+		// We might be mid scroll; we want to calculate where we scroll to based on
+		// where this scroll would end, not where we are now (to allow for people
+		// bashing 'forwards' very fast.
+		int remainingX = mScroller.getFinalX() - mScroller.getCurrX();
+		int remainingY = mScroller.getFinalY() - mScroller.getCurrY();
+		// left/top is in terms of pixels within the scaled document; e.g. 1000
+		int left  = -(v.getLeft() + mXScroll + remainingX);
+		int top   = -(v.getTop()  + mYScroll + remainingY);
+		// docWidth/Height are the width/height of the scaled document e.g. 2000x3000
+		int docWidth  = v.getMeasuredWidth();
+		int docHeight = v.getMeasuredHeight();
+
+		int xOffset, yOffset;
+		if (top <= 0) {
+			// We are flush with the top. Step back to previous column.
+			if (left < screenWidth) {
+				/* No room for previous column - go to previous page */
+				View pv = mChildViews.get(mCurrent-1);
+				if (pv == null) /* No page to advance to */
+					return;
+				int prevDocWidth = pv.getMeasuredWidth();
+				int prevDocHeight = pv.getMeasuredHeight();
+
+				// Allow for the next page maybe being shorter than the screen is high
+				yOffset = (prevDocHeight < screenHeight ? ((prevDocHeight - screenHeight)>>1) : 0);
+
+				int prevLeft  = -(pv.getLeft() + mXScroll);
+				int prevTop  = -(pv.getTop() + mYScroll);
+				if (prevDocWidth < screenWidth) {
+					// Previous page is too narrow to fill the screen. Scroll to the bottom, centred.
+					xOffset = (prevDocWidth - screenWidth)>>1;
+				} else {
+					// Reset X back to the right hand column
+					xOffset = (left > 0 ? left % screenWidth : 0);
+					if (xOffset + screenWidth > prevDocWidth)
+						xOffset = prevDocWidth - screenWidth;
+					while (xOffset + screenWidth*2 < prevDocWidth)
+						xOffset += screenWidth;
+				}
+				xOffset -= prevLeft;
+				yOffset -= prevTop-prevDocHeight+screenHeight;
+			} else {
+				// Move to bottom of previous column
+				xOffset = -screenWidth;
+				yOffset = docHeight - screenHeight + top;
+			}
+		} else {
+			// Retreat by 90% of the screen height downwards (in case lines are partially cut off)
+			xOffset = 0;
+			yOffset = -smartAdvanceAmount(screenHeight, top);
+		}
+		mScrollerLastX = mScrollerLastY = 0;
+		mScroller.startScroll(0, 0, remainingX - xOffset, remainingY - yOffset, 400);
+		post(this);
+	}
+
 	public void resetupChildren() {
 		for (int i = 0; i < mChildViews.size(); i++)
 			onChildSetup(mChildViews.keyAt(i), mChildViews.valueAt(i));
@@ -113,6 +287,24 @@ public class ReaderView extends AdapterView<Adapter>
 	public void applyToChildren(ViewMapper mapper) {
 		for (int i = 0; i < mChildViews.size(); i++)
 			mapper.applyToView(mChildViews.valueAt(i));
+	}
+
+	public void refresh(boolean reflow) {
+		mReflow = reflow;
+
+		mScale = 1.0f;
+		mXScroll = mYScroll = 0;
+
+		int numChildren = mChildViews.size();
+		for (int i = 0; i < numChildren; i++) {
+			View v = mChildViews.valueAt(i);
+			onNotInUse(v);
+			removeViewInLayout(v);
+		}
+		mChildViews.clear();
+		mViewCache.clear();
+
+		requestLayout();
 	}
 
 	protected void onChildSetup(int i, View v) {}
@@ -124,6 +316,8 @@ public class ReaderView extends AdapterView<Adapter>
 	protected void onUnsettle(View v) {};
 
 	protected void onNotInUse(View v) {};
+
+	protected void onScaleChild(View v, Float scale) {};
 
 	public View getDisplayedView() {
 		return mChildViews.get(mCurrent);
@@ -232,18 +426,31 @@ public class ReaderView extends AdapterView<Adapter>
 
 	public boolean onScale(ScaleGestureDetector detector) {
 		float previousScale = mScale;
-		mScale = Math.min(Math.max(mScale * detector.getScaleFactor(), MIN_SCALE), MAX_SCALE);
-		float factor = mScale/previousScale;
+		float scale_factor = mReflow ? REFLOW_SCALE_FACTOR : 1.0f;
+		float min_scale = MIN_SCALE * scale_factor;
+		float max_scale = MAX_SCALE * scale_factor;
+		mScale = Math.min(Math.max(mScale * detector.getScaleFactor(), min_scale), max_scale);
 
-		View v = mChildViews.get(mCurrent);
-		if (v != null) {
-			// Work out the focus point relative to the view top left
-			int viewFocusX = (int)detector.getFocusX() - (v.getLeft() + mXScroll);
-			int viewFocusY = (int)detector.getFocusY() - (v.getTop() + mYScroll);
-			// Scroll to maintain the focus point
-			mXScroll += viewFocusX - viewFocusX * factor;
-			mYScroll += viewFocusY - viewFocusY * factor;
-			requestLayout();
+		if (mReflow) {
+			applyToChildren(new ViewMapper() {
+				@Override
+				void applyToView(View view) {
+					onScaleChild(view, mScale);
+				}
+			});
+		} else {
+			float factor = mScale/previousScale;
+
+			View v = mChildViews.get(mCurrent);
+			if (v != null) {
+				// Work out the focus point relative to the view top left
+				int viewFocusX = (int)detector.getFocusX() - (v.getLeft() + mXScroll);
+				int viewFocusY = (int)detector.getFocusY() - (v.getTop() + mYScroll);
+				// Scroll to maintain the focus point
+				mXScroll += viewFocusX - viewFocusX * factor;
+				mYScroll += viewFocusY - viewFocusY * factor;
+				requestLayout();
+			}
 		}
 		return true;
 	}
@@ -474,6 +681,7 @@ public class ReaderView extends AdapterView<Adapter>
 			addAndMeasureChild(i, v);
 		}
 		onChildSetup(i, v);
+		onScaleChild(v, mScale);
 
 		return v;
 	}
@@ -491,12 +699,18 @@ public class ReaderView extends AdapterView<Adapter>
 	private void measureView(View v) {
 		// See what size the view wants to be
 		v.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED);
+
+		if (!mReflow) {
 		// Work out a scale that will fit it to this view
 		float scale = Math.min((float)getWidth()/(float)v.getMeasuredWidth(),
 					(float)getHeight()/(float)v.getMeasuredHeight());
 		// Use the fitting values scaled by our current scale factor
 		v.measure(View.MeasureSpec.EXACTLY | (int)(v.getMeasuredWidth()*scale*mScale),
 				View.MeasureSpec.EXACTLY | (int)(v.getMeasuredHeight()*scale*mScale));
+		} else {
+			v.measure(View.MeasureSpec.EXACTLY | (int)(v.getMeasuredWidth()),
+					View.MeasureSpec.EXACTLY | (int)(v.getMeasuredHeight()));
+		}
 	}
 
 	private Rect getScrollBounds(int left, int top, int right, int bottom) {

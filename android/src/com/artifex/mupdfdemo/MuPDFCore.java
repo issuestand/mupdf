@@ -1,4 +1,4 @@
-package com.artifex.mupdf;
+package com.artifex.mupdfdemo;
 import java.util.ArrayList;
 
 import android.graphics.Bitmap;
@@ -18,9 +18,11 @@ public class MuPDFCore
 	private float pageWidth;
 	private float pageHeight;
 	private long globals;
+	private byte fileBuffer[];
 
 	/* The native functions */
 	private native long openFile(String filename);
+	private native long openBuffer();
 	private native int countPagesInternal();
 	private native void gotoPageInternal(int localActionPageNum);
 	private native float getPageWidth();
@@ -36,6 +38,8 @@ public class MuPDFCore
 			int patchW, int patchH);
 	private native RectF[] searchPage(String text);
 	private native TextChar[][][][] text();
+	private native byte[] textAsHtml();
+	private native void addStrikeOutAnnotationInternal(RectF[] lines);
 	private native int passClickEventInternal(int page, float x, float y);
 	private native void setFocusedWidgetChoiceSelectedInternal(String [] selected);
 	private native String [] getFocusedWidgetChoiceSelected();
@@ -65,6 +69,16 @@ public class MuPDFCore
 		if (globals == 0)
 		{
 			throw new Exception("Failed to open "+filename);
+		}
+	}
+
+	public MuPDFCore(byte buffer[]) throws Exception
+	{
+		fileBuffer = buffer;
+		globals = openBuffer();
+		if (globals == 0)
+		{
+			throw new Exception("Failed to open buffer");
 		}
 	}
 
@@ -119,19 +133,17 @@ public class MuPDFCore
 		globals = 0;
 	}
 
-	public synchronized void drawPage(BitmapHolder h, int page,
+	public synchronized Bitmap drawPage(int page,
 			int pageW, int pageH,
 			int patchX, int patchY,
 			int patchW, int patchH) {
 		gotoPage(page);
-		// Clear the reference out before creating the new bitmap
-		h.setBm(null);
 		Bitmap bm = Bitmap.createBitmap(patchW, patchH, Config.ARGB_8888);
 		drawPage(bm, pageW, pageH, patchX, patchY, patchW, patchH);
-		h.setBm(bm);
+		return bm;
 	}
 
-	public synchronized void updatePage(BitmapHolder h, int page,
+	public synchronized Bitmap updatePage(BitmapHolder h, int page,
 			int pageW, int pageH,
 			int patchX, int patchY,
 			int patchW, int patchH) {
@@ -139,14 +151,13 @@ public class MuPDFCore
 		Bitmap old_bm = h.getBm();
 
 		if (old_bm == null)
-			return;
+			return null;
 
 		bm = old_bm.copy(Bitmap.Config.ARGB_8888, false);
 		old_bm = null;
 
-		h.setBm(bm);
-
 		updatePageInternal(bm, page, pageW, pageH, patchX, patchY, patchW, patchH);
+		return bm;
 	}
 
 	public synchronized PassClickResult passClickEvent(int page, float x, float y) {
@@ -190,6 +201,11 @@ public class MuPDFCore
 		return searchPage(text);
 	}
 
+	public synchronized byte[] html(int page) {
+		gotoPage(page);
+		return textAsHtml();
+	}
+
 	public synchronized TextWord [][] textLines(int page) {
 		gotoPage(page);
 		TextChar[][][][] chars = text();
@@ -224,6 +240,11 @@ public class MuPDFCore
 		}
 
 		return lns.toArray(new TextWord[lns.size()][]);
+	}
+
+	public synchronized void addStrikeOutAnnotation(int page, RectF[] lines) {
+		gotoPage(page);
+		addStrikeOutAnnotationInternal(lines);
 	}
 
 	public synchronized boolean hasOutline() {

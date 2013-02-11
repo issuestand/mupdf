@@ -575,7 +575,7 @@ pdf_array_contains(pdf_obj *arr, pdf_obj *obj)
 	return 0;
 }
 
-pdf_obj *pdf_new_rect(fz_context *ctx, fz_rect *rect)
+pdf_obj *pdf_new_rect(fz_context *ctx, const fz_rect *rect)
 {
 	pdf_obj *arr = NULL;
 	pdf_obj *item = NULL;
@@ -616,7 +616,7 @@ pdf_obj *pdf_new_rect(fz_context *ctx, fz_rect *rect)
 	return arr;
 }
 
-pdf_obj *pdf_new_matrix(fz_context *ctx, fz_matrix *mtx)
+pdf_obj *pdf_new_matrix(fz_context *ctx, const fz_matrix *mtx)
 {
 	pdf_obj *arr = NULL;
 	pdf_obj *item = NULL;
@@ -1052,6 +1052,25 @@ pdf_dict_putp(pdf_obj *obj, const char *keys, pdf_obj *val)
 			else
 				pdf_dict_dels(obj, k);
 		}
+	}
+}
+
+void
+pdf_dict_putp_drop(pdf_obj *obj, const char *keys, pdf_obj *val)
+{
+	fz_context *ctx = obj->ctx;
+
+	fz_try(ctx)
+	{
+		pdf_dict_putp(obj, keys, val);
+	}
+	fz_always(ctx)
+	{
+		pdf_drop_obj(val);
+	}
+	fz_catch(ctx)
+	{
+		fz_rethrow(ctx);
 	}
 }
 
