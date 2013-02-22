@@ -68,7 +68,6 @@ struct data {
 	fz_pixmap *pix;
 };
 
-
 // This is the function run by each rendering function. It takes
 // pointer to an instance of the data structure described above and
 // renders the display list into the pixmap before exiting.
@@ -95,7 +94,7 @@ renderer(void *data)
 
 	fprintf(stderr, "thread at page %d rendering!\n", pagenumber);
 	fz_device *dev = fz_new_draw_device(ctx, pix);
-	fz_run_display_list(list, dev, fz_identity, bbox, NULL);
+	fz_run_display_list(list, dev, &fz_identity, &bbox, NULL);
 	fz_free_device(dev);
 
 	// This threads context is freed.
@@ -180,7 +179,9 @@ int main(int argc, char **argv)
 
 		// Compute the bounding box for each page.
 
-		fz_rect bbox = fz_bound_page(doc, page);
+		fz_rect bbox;
+		fz_irect rbox;
+		fz_bound_page(doc, page, &bbox);
 
 		// Create a display list that will hold the drawing
 		// commands for the page.
@@ -191,7 +192,7 @@ int main(int argc, char **argv)
 		// to populate the page's display list.
 
 		fz_device *dev = fz_new_list_device(ctx, list);
-		fz_run_page(doc, page, dev, fz_identity, NULL);
+		fz_run_page(doc, page, dev, &fz_identity, NULL);
 		fz_free_device(dev);
 
 		// The page is no longer needed, all drawing commands
@@ -201,7 +202,7 @@ int main(int argc, char **argv)
 
 		// Create a white pixmap using the correct dimensions.
 
-		fz_pixmap *pix = fz_new_pixmap_with_bbox(ctx, fz_device_rgb, fz_round_rect(bbox));
+		fz_pixmap *pix = fz_new_pixmap_with_bbox(ctx, fz_device_rgb, fz_round_rect(&rbox, &bbox));
 		fz_clear_pixmap_with_value(ctx, pix, 0xff);
 
 		// Populate the data structure to be sent to the

@@ -241,7 +241,6 @@ struct fz_error_context_s
 void fz_var_imp(void *);
 #define fz_var(var) fz_var_imp((void *)&(var))
 
-
 /*
 	Exception macro definitions. Just treat these as a black box - pay no
 	attention to the man behind the curtain.
@@ -270,7 +269,6 @@ void fz_throw(fz_context *, const char *, ...) __printflike(2, 3);
 void fz_rethrow(fz_context *);
 void fz_warn(fz_context *ctx, const char *fmt, ...) __printflike(2, 3);
 const char *fz_caught(fz_context *ctx);
-
 
 /*
 	fz_flush_warnings: Flush any repeated warnings.
@@ -859,7 +857,6 @@ struct fz_matrix_s
 	float a, b, c, d, e, f;
 };
 
-
 /*
 	fz_identity: Identity transform matrix.
 */
@@ -1058,7 +1055,7 @@ float fz_matrix_expansion(const fz_matrix *m); /* sumatrapdf */
 
 	Does not throw exceptions.
 */
-fz_rect *fz_intersect_rect(fz_rect *a, const fz_rect *b);
+fz_rect *fz_intersect_rect(fz_rect *restrict a, const fz_rect *restrict b);
 
 /*
 	fz_intersect_irect: Compute intersection of two bounding boxes.
@@ -1068,7 +1065,7 @@ fz_rect *fz_intersect_rect(fz_rect *a, const fz_rect *b);
 
 	Does not throw exceptions.
 */
-fz_irect *fz_intersect_irect(fz_irect *a, const fz_irect *b);
+fz_irect *fz_intersect_irect(fz_irect *restrict a, const fz_irect *restrict b);
 
 /*
 	fz_union_rect: Compute union of two rectangles.
@@ -1082,7 +1079,7 @@ fz_irect *fz_intersect_irect(fz_irect *a, const fz_irect *b);
 
 	Does not throw exceptions.
 */
-fz_rect *fz_union_rect(fz_rect *a, const fz_rect *b);
+fz_rect *fz_union_rect(fz_rect *restrict a, const fz_rect *restrict b);
 
 /*
 	fz_irect_from_rect: Convert a rect into the minimal bounding box
@@ -1102,7 +1099,7 @@ fz_rect *fz_union_rect(fz_rect *a, const fz_rect *b);
 	Does not throw exceptions.
 */
 
-fz_irect *fz_irect_from_rect(fz_irect *bbox, const fz_rect *rect);
+fz_irect *fz_irect_from_rect(fz_irect *restrict bbox, const fz_rect *restrict rect);
 
 /*
 	fz_round_rect: Round rectangle coordinates.
@@ -1120,7 +1117,7 @@ fz_irect *fz_irect_from_rect(fz_irect *bbox, const fz_rect *rect);
 
 	Does not throw exceptions.
 */
-fz_irect *fz_round_rect(fz_irect *bbox, const fz_rect *rect);
+fz_irect *fz_round_rect(fz_irect *restrict bbox, const fz_rect *restrict rect);
 
 /*
 	fz_rect_from_irect: Convert a bbox into a rect.
@@ -1136,7 +1133,7 @@ fz_irect *fz_round_rect(fz_irect *bbox, const fz_rect *rect);
 
 	Does not throw exceptions.
 */
-fz_rect *fz_rect_from_irect(fz_rect *rect, const fz_irect *bbox);
+fz_rect *fz_rect_from_irect(fz_rect *restrict rect, const fz_irect *restrict bbox);
 
 /*
 	fz_expand_rect: Expand a bbox by a given amount in all directions.
@@ -1155,15 +1152,6 @@ fz_rect *fz_expand_rect(fz_rect *b, float expand);
 fz_irect *fz_translate_irect(fz_irect *a, int xoff, int yoff);
 
 /*
-	fz_translate_rect: Translate rectangle.
-
-	Translate a rectangle by a given x and y offset. Allows for overflow.
-
-	Does not throw exceptions.
-*/
-fz_rect *fz_translate_rect(fz_rect *a, int xoff, int yoff);
-
-/*
 	fz_transform_point: Apply a transformation to a point.
 
 	transform: Transformation matrix to apply. See fz_concat,
@@ -1176,7 +1164,7 @@ fz_rect *fz_translate_rect(fz_rect *a, int xoff, int yoff);
 
 	Does not throw exceptions.
 */
-fz_point *fz_transform_point(fz_point *point, const fz_matrix *transform);
+fz_point *fz_transform_point(fz_point *restrict point, const fz_matrix *restrict transform);
 
 /*
 	fz_transform_vector: Apply a transformation to a vector.
@@ -1189,7 +1177,7 @@ fz_point *fz_transform_point(fz_point *point, const fz_matrix *transform);
 
 	Does not throw exceptions.
 */
-fz_point *fz_transform_vector(fz_point *vector, const fz_matrix *transform);
+fz_point *fz_transform_vector(fz_point *restrict vector, const fz_matrix *restrict transform);
 
 /*
 	fz_transform_rect: Apply a transform to a rectangle.
@@ -1208,7 +1196,7 @@ fz_point *fz_transform_vector(fz_point *vector, const fz_matrix *transform);
 
 	Does not throw exceptions.
 */
-fz_rect *fz_transform_rect(fz_rect *rect, const fz_matrix *transform);
+fz_rect *fz_transform_rect(fz_rect *restrict rect, const fz_matrix *restrict transform);
 
 /*
 	fz_buffer is a wrapper around a dynamically allocated array of bytes.
@@ -2913,7 +2901,6 @@ int fz_choice_widget_value(fz_interactive *idoc, fz_widget *tw, char *opts[]);
 */
 void fz_choice_widget_set_value(fz_interactive *idoc, fz_widget *tw, int n, char *opts[]);
 
-
 /*
 	Document events: the objects via which MuPDF informs the calling app
 	of occurrences emanating from the document, possibly from user interaction
@@ -3104,7 +3091,7 @@ struct fz_write_options_s
 	int do_linear; /* If non-zero then write linearised. */
 	int continue_on_error; /* If non-zero, errors are (optionally)
 					counted and writing continues. */
-	int *errors;   /* Pointer to a place to store a count of errors */
+	int *errors; /* Pointer to a place to store a count of errors */
 };
 
 /*	An enumeration of bitflags to use in the above 'do_expand' field of

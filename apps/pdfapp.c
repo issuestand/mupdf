@@ -44,8 +44,8 @@ static void pdfapp_error(pdfapp_t *app, char *msg)
 char *pdfapp_version(pdfapp_t *app)
 {
 	return
-		"MuPDF 1.1\n"
-		"Copyright 2006-2012 Artifex Software, Inc.\n";
+		"MuPDF 1.2\n"
+		"Copyright 2006-2013 Artifex Software, Inc.\n";
 }
 
 char *pdfapp_usage(pdfapp_t *app)
@@ -342,7 +342,7 @@ static int pdfapp_save(pdfapp_t *app)
 				if (written)
 				{
 					char buf2[PATH_MAX];
-					strncpy(buf2, app->docpath, PATH_MAX);
+					fz_strlcpy(buf2, app->docpath, PATH_MAX);
 					pdfapp_close(app);
 					winreplacefile(buf, buf2);
 					pdfapp_open(app, buf2, 1);
@@ -579,7 +579,6 @@ static void pdfapp_updatepage(pdfapp_t *app)
 
 		fz_free_device(idev);
 	}
-
 
 	pdfapp_showpage(app, 0, 0, 1, 0);
 }
