@@ -39,7 +39,8 @@ public class MuPDFCore
 	private native RectF[] searchPage(String text);
 	private native TextChar[][][][] text();
 	private native byte[] textAsHtml();
-	private native void addStrikeOutAnnotationInternal(RectF[] lines);
+	private native void addMarkupAnnotationInternal(PointF[] quadPoints, int type);
+	private native void deleteAnnotationInternal(int annot_index);
 	private native int passClickEventInternal(int page, float x, float y);
 	private native void setFocusedWidgetChoiceSelectedInternal(String [] selected);
 	private native String [] getFocusedWidgetChoiceSelected();
@@ -49,6 +50,7 @@ public class MuPDFCore
 	private native int getFocusedWidgetTypeInternal();
 	private native LinkInfo [] getPageLinksInternal(int page);
 	private native RectF[] getWidgetAreasInternal(int page);
+	private native Annotation[] getAnnotationsInternal(int page);
 	private native OutlineItem [] getOutlineInternal();
 	private native boolean hasOutlineInternal();
 	private native boolean needsPasswordInternal();
@@ -196,6 +198,10 @@ public class MuPDFCore
 		return getWidgetAreasInternal(page);
 	}
 
+	public synchronized Annotation [] getAnnoations(int page) {
+		return getAnnotationsInternal(page);
+	}
+
 	public synchronized RectF [] searchPage(int page, String text) {
 		gotoPage(page);
 		return searchPage(text);
@@ -242,9 +248,14 @@ public class MuPDFCore
 		return lns.toArray(new TextWord[lns.size()][]);
 	}
 
-	public synchronized void addStrikeOutAnnotation(int page, RectF[] lines) {
+	public synchronized void addMarkupAnnotation(int page, PointF[] quadPoints, Annotation.Type type) {
 		gotoPage(page);
-		addStrikeOutAnnotationInternal(lines);
+		addMarkupAnnotationInternal(quadPoints, type.ordinal());
+	}
+
+	public synchronized void deleteAnnotation(int page, int annot_index) {
+		gotoPage(page);
+		deleteAnnotationInternal(annot_index);
 	}
 
 	public synchronized boolean hasOutline() {

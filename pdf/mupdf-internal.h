@@ -170,6 +170,7 @@ struct pdf_document_s
 	pdf_js *js;
 	int recalculating;
 	int dirty;
+	void (*update_appearance)(pdf_document *xref, pdf_obj *annot);
 
 	fz_doc_event_cb *event_cb;
 	void *event_cb_data;
@@ -503,7 +504,8 @@ struct pdf_annot_s
 	fz_matrix matrix;
 	pdf_annot *next;
 	pdf_annot *next_changed;
-	int type;
+	int annot_type;
+	int widget_type;
 };
 
 fz_link_dest pdf_parse_link_dest(pdf_document *doc, pdf_obj *dest);
@@ -518,6 +520,25 @@ pdf_annot *pdf_load_annots(pdf_document *, pdf_obj *annots, pdf_page *page);
 void pdf_update_annot(pdf_document *, pdf_annot *annot);
 void pdf_free_annot(fz_context *ctx, pdf_annot *link);
 
+/* Field flags */
+enum
+{
+	Ff_Multiline = 1 << (13-1),
+	Ff_Password = 1 << (14-1),
+	Ff_NoToggleToOff = 1 << (15-1),
+	Ff_Radio = 1 << (16-1),
+	Ff_Pushbutton = 1 << (17-1),
+	Ff_Combo = 1 << (18-1),
+	Ff_FileSelect = 1 << (21-1),
+	Ff_MultiSelect = 1 << (22-1),
+	Ff_DoNotSpellCheck = 1 << (23-1),
+	Ff_DoNotScroll = 1 << (24-1),
+	Ff_Comb = 1 << (25-1),
+	Ff_RadioInUnison = 1 << (26-1)
+};
+
+pdf_obj *pdf_get_inheritable(pdf_document *doc, pdf_obj *obj, char *key);
+int pdf_get_field_flags(pdf_document *doc, pdf_obj *obj);
 int pdf_field_type(pdf_document *doc, pdf_obj *field);
 char *pdf_field_value(pdf_document *doc, pdf_obj *field);
 int pdf_field_set_value(pdf_document *doc, pdf_obj *field, char *text);
@@ -547,6 +568,8 @@ struct pdf_page_s
 	fz_link *links;
 	pdf_annot *annots;
 	pdf_annot *changed_annots;
+	pdf_annot *deleted_annots;
+	pdf_annot *tmp_annots;
 	pdf_obj *me;
 	float duration;
 	int transition_present;
@@ -572,6 +595,7 @@ void pdf_remove_item(fz_context *ctx, fz_store_free_fn *free, pdf_obj *key);
 int pdf_has_unsaved_changes(pdf_document *doc);
 int pdf_pass_event(pdf_document *doc, pdf_page *page, fz_ui_event *ui_event);
 void pdf_update_page(pdf_document *doc, pdf_page *page);
+fz_annot_type pdf_annot_obj_type(pdf_obj *obj);
 pdf_annot *pdf_poll_changed_annot(pdf_document *idoc, pdf_page *page);
 fz_widget *pdf_focused_widget(pdf_document *doc);
 fz_widget *pdf_first_widget(pdf_document *doc, pdf_page *page);
@@ -585,7 +609,11 @@ int pdf_choice_widget_is_multiselect(pdf_document *doc, fz_widget *tw);
 int pdf_choice_widget_value(pdf_document *doc, fz_widget *tw, char *opts[]);
 void pdf_choice_widget_set_value(pdf_document *doc, fz_widget *tw, int n, char *opts[]);
 pdf_annot *pdf_create_annot(pdf_document *doc, pdf_page *page, fz_annot_type type);
-void pdf_set_annot_appearance(pdf_document *doc, pdf_annot *annot, fz_display_list *disp_list);
+void pdf_delete_annot(pdf_document *doc, pdf_page *page, pdf_annot *annot);
+void pdf_set_annot_appearance(pdf_document *doc, pdf_annot *annot, fz_rect *rect, fz_display_list *disp_list);
+void pdf_set_markup_annot_quadpoints(pdf_document *doc, pdf_annot *annot, fz_point *qp, int n);
+void pdf_set_markup_obj_appearance(pdf_document *doc, pdf_obj *annot, float color[3], float alpha, float line_thickness, float line_height);
+void pdf_set_markup_appearance(pdf_document *doc, pdf_annot *annot, float color[3], float alpha, float line_thickness, float line_height);
 void pdf_set_doc_event_callback(pdf_document *doc, fz_doc_event_cb *event_cb, void *data);
 
 void pdf_event_issue_alert(pdf_document *doc, fz_alert_event *event);

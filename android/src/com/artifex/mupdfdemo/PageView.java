@@ -3,8 +3,6 @@ package com.artifex.mupdfdemo;
 import java.util.ArrayList;
 import java.util.Iterator;
 
-import android.content.ClipData;
-import android.content.ClipboardManager;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
@@ -48,7 +46,13 @@ class OpaqueImageView extends ImageView {
 	}
 }
 
-abstract class TextSelector {
+interface TextProcessor {
+	void onStartLine();
+	void onWord(TextWord word);
+	void onEndLine();
+}
+
+class TextSelector {
 	final private TextWord[][] mText;
 	final private RectF mSelectBox;
 
@@ -57,11 +61,7 @@ abstract class TextSelector {
 		mSelectBox = selectBox;
 	}
 
-	protected abstract void onStartLine();
-	protected abstract void onWord(TextWord word);
-	protected abstract void onEndLine();
-
-	public void select() {
+	public void select(TextProcessor tp) {
 		if (mText == null || mSelectBox == null)
 			return;
 
@@ -87,13 +87,13 @@ abstract class TextSelector {
 				end = mSelectBox.right;
 			}
 
-			onStartLine();
+			tp.onStartLine();
 
 			for (TextWord word : line)
 				if (word.right > start && word.left < end)
-					onWord(word);
+					tp.onWord(word);
 
-			onEndLine();
+			tp.onEndLine();
 		}
 	}
 }
@@ -101,11 +101,10 @@ abstract class TextSelector {
 public abstract class PageView extends ViewGroup {
 	private static final int HIGHLIGHT_COLOR = 0x802572AC;
 	private static final int LINK_COLOR = 0x80AC7225;
+	private static final int BOX_COLOR = 0xFF4444FF;
 	private static final int BACKGROUND_COLOR = 0xFFFFFFFF;
 	private static final int PROGRESS_DIALOG_DELAY = 200;
-	private static final float LINE_THICKNESS = 0.07f;
-	private static final float STRIKE_HEIGHT = 0.375f;
-	private final Context   mContext;
+	protected final Context   mContext;
 	protected     int       mPageNumber;
 	protected     Point     mParentSize;
 	protected     Point     mSize;   // Size of page at minimum zoom
@@ -114,7 +113,6 @@ public abstract class PageView extends ViewGroup {
 	private       ImageView mEntire; // Image rendered at minimum zoom
 	private       BitmapHolder mEntireBmh;
 	private       AsyncTask<Void,Void,TextWord[][]> mGetText;
-	private       AsyncTask<RectF[],Void,Void> mAddStrikeOut;
 	private       AsyncTask<Void,Void,LinkInfo[]> mGetLinkInfo;
 	private       AsyncTask<Void,Void,Bitmap> mDrawEntire;
 
@@ -127,6 +125,7 @@ public abstract class PageView extends ViewGroup {
 	protected     LinkInfo  mLinks[];
 	private       RectF     mSelectBox;
 	private       TextWord  mText[][];
+	private       RectF     mItemSelectBox;
 	private       View      mSearchView;
 	private       boolean   mIsBlank;
 	private       boolean   mHighlightLinks;
@@ -147,7 +146,7 @@ public abstract class PageView extends ViewGroup {
 	protected abstract Bitmap updatePage(BitmapHolder h, int sizeX, int sizeY, int patchX, int patchY, int patchWidth, int patchHeight);
 	protected abstract LinkInfo[] getLinkInfo();
 	protected abstract TextWord[][] getText();
-	protected abstract void addStrikeOut(RectF[] lines);
+	protected abstract void addMarkup(PointF[] quadPoints, Annotation.Type type);
 
 	private void reinit() {
 		// Cancel pending render task
@@ -194,6 +193,7 @@ public abstract class PageView extends ViewGroup {
 		mLinks = null;
 		mSelectBox = null;
 		mText = null;
+		mItemSelectBox = null;
 	}
 
 	public void releaseResources() {
@@ -225,6 +225,9 @@ public abstract class PageView extends ViewGroup {
 		}
 
 		mIsBlank = false;
+		// Highlights may be missing because mIsBlank was true on last draw
+		if (mSearchView != null)
+			mSearchView.invalidate();
 
 		mPageNumber = page;
 		if (mEntire == null) {
@@ -320,27 +323,28 @@ public abstract class PageView extends ViewGroup {
 
 					if (mSelectBox != null && mText != null) {
 						paint.setColor(HIGHLIGHT_COLOR);
-						TextSelector sel = new TextSelector(mText, mSelectBox) {
+						processSelectedText(new TextProcessor() {
 							RectF rect;
 
-							@Override
-							protected void onStartLine() {
+							public void onStartLine() {
 								rect = new RectF();
 							}
 
-							@Override
-							protected void onWord(TextWord word) {
+							public void onWord(TextWord word) {
 								rect.union(word);
 							}
 
-							@Override
-							protected void onEndLine() {
+							public void onEndLine() {
 								if (!rect.isEmpty())
 									canvas.drawRect(rect.left*scale, rect.top*scale, rect.right*scale, rect.bottom*scale, paint);
 							}
-						};
+						});
+					}
 
-						sel.select();
+					if (mItemSelectBox != null) {
+						paint.setStyle(Paint.Style.STROKE);
+						paint.setColor(BOX_COLOR);
+						canvas.drawRect(mItemSelectBox.left*scale, mItemSelectBox.top*scale, mItemSelectBox.right*scale, mItemSelectBox.bottom*scale, paint);
 					}
 				}
 			};
@@ -406,101 +410,14 @@ public abstract class PageView extends ViewGroup {
 		}
 	}
 
-	public boolean copySelection() {
-		final StringBuilder text = new StringBuilder();
-
-		TextSelector sel = new TextSelector(mText, mSelectBox) {
-			StringBuilder line;
-
-			@Override
-			protected void onStartLine() {
-				line = new StringBuilder();
-			}
-
-			@Override
-			protected void onWord(TextWord word) {
-				if (line.length() > 0)
-					line.append(' ');
-				line.append(word.w);
-			}
-
-			@Override
-			protected void onEndLine() {
-				if (text.length() > 0)
-					text.append('\n');
-				text.append(line);
-			}
-		};
-
-		sel.select();
-
-		if (text.length() == 0)
-			return false;
-
-		int currentApiVersion = android.os.Build.VERSION.SDK_INT;
-		if (currentApiVersion >= android.os.Build.VERSION_CODES.HONEYCOMB) {
-			android.content.ClipboardManager cm = (android.content.ClipboardManager)mContext.getSystemService(Context.CLIPBOARD_SERVICE);
-
-			cm.setPrimaryClip(ClipData.newPlainText("MuPDF", text));
-		} else {
-			android.text.ClipboardManager cm = (android.text.ClipboardManager)mContext.getSystemService(Context.CLIPBOARD_SERVICE);
-			cm.setText(text);
-		}
-
-		mSelectBox = null;
-		mSearchView.invalidate();
-
-		return true;
+	protected void processSelectedText(TextProcessor tp) {
+		(new TextSelector(mText, mSelectBox)).select(tp);
 	}
 
-	public void strikeOutSelection() {
-		final ArrayList<RectF> lines = new ArrayList<RectF>();
-		TextSelector sel = new TextSelector(mText, mSelectBox) {
-			RectF rect;
-
-			@Override
-			protected void onStartLine() {
-				rect = new RectF();
-			}
-
-			@Override
-			protected void onWord(TextWord word) {
-				rect.union(word);
-			}
-
-			@Override
-			protected void onEndLine() {
-				if (!rect.isEmpty()) {
-					// These are vertical lines so we can specify
-					// both position and thickness with a RectF
-					float vcenter = rect.bottom - (rect.bottom - rect.top)*STRIKE_HEIGHT;
-					float thickness = (rect.bottom - rect.top)*LINE_THICKNESS;
-					rect.top = vcenter - thickness/2;
-					rect.bottom = vcenter + thickness/2;
-					lines.add(rect);
-				}
-			}
-		};
-
-		sel.select();
-
-		mAddStrikeOut = new AsyncTask<RectF[],Void,Void>() {
-			@Override
-			protected Void doInBackground(RectF[]... params) {
-				addStrikeOut(params[0]);
-				return null;
-			}
-
-			@Override
-			protected void onPostExecute(Void result) {
-				update();
-			}
-		};
-
-		mAddStrikeOut.execute(lines.toArray(new RectF[lines.size()]));
-
-		mSelectBox = null;
-		mSearchView.invalidate();
+	public void setItemSelectBox(RectF rect) {
+		mItemSelectBox = rect;
+		if (mSearchView != null)
+			mSearchView.invalidate();
 	}
 
 	@Override

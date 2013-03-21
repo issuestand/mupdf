@@ -473,6 +473,11 @@ struct fz_store_hash_s
 			void *ptr;
 			int i;
 		} pi;
+		struct
+		{
+			int id;
+			float m[4];
+		} im;
 	} u;
 };
 
@@ -1193,11 +1198,6 @@ fz_pixmap *fz_render_stroked_glyph(fz_context *ctx, fz_font*, int, const fz_matr
 void fz_render_t3_glyph_direct(fz_context *ctx, fz_device *dev, fz_font *font, int gid, const fz_matrix *trm, void *gstate, int nestedDepth);
 void fz_prepare_t3_glyph(fz_context *ctx, fz_font *font, int gid, int nestedDepth);
 
-typedef enum
-{
-	FZ_ANNOT_STRIKEOUT
-} fz_annot_type;
-
 /*
 	fz_create_annot: create a new annotation of the specified type on the
 	specified page. The returned pdf_annot structure is owned by the page
@@ -1206,10 +1206,26 @@ typedef enum
 fz_annot *fz_create_annot(fz_interactive *idoc, fz_page *page, fz_annot_type type);
 
 /*
+	fz_delete_annot: delete an annotation
+*/
+void fz_delete_annot(fz_interactive *idoc, fz_page *page, fz_annot *annot);
+
+/*
 	fz_set_annot_appearance: update the appearance of an annotation based
 	on a display list.
 */
-void fz_set_annot_appearance(fz_interactive *idoc, fz_annot *annot, fz_display_list *disp_list);
+void fz_set_annot_appearance(fz_interactive *idoc, fz_annot *annot, fz_rect *rect, fz_display_list *disp_list);
+
+/*
+	fz_set_markup_annot_quadpoints: set the quadpoints for a text-markup annotation.
+*/
+void fz_set_markup_annot_quadpoints(fz_interactive *idoc, fz_annot *annot, fz_point *qp, int n);
+
+/*
+	fz_set_markup_appearance: set the appearance stream of a text markup annotations, basing it on
+	its QuadPoints array
+*/
+void fz_set_markup_appearance(fz_interactive *idoc, fz_annot *annot, float color[3], float alpha, float line_thickness, float line_height);
 
 /*
  * Text buffer.
@@ -1429,7 +1445,7 @@ struct fz_device_s
 	void (*begin_group)(fz_device *, const fz_rect *, int isolated, int knockout, int blendmode, float alpha);
 	void (*end_group)(fz_device *);
 
-	void (*begin_tile)(fz_device *, const fz_rect *area, const fz_rect *view, float xstep, float ystep, const fz_matrix *ctm);
+	int (*begin_tile)(fz_device *, const fz_rect *area, const fz_rect *view, float xstep, float ystep, const fz_matrix *ctm, int id);
 	void (*end_tile)(fz_device *);
 
 	int error_depth;
@@ -1455,6 +1471,7 @@ void fz_end_mask(fz_device *dev);
 void fz_begin_group(fz_device *dev, const fz_rect *area, int isolated, int knockout, int blendmode, float alpha);
 void fz_end_group(fz_device *dev);
 void fz_begin_tile(fz_device *dev, const fz_rect *area, const fz_rect *view, float xstep, float ystep, const fz_matrix *ctm);
+int fz_begin_tile_id(fz_device *dev, const fz_rect *area, const fz_rect *view, float xstep, float ystep, const fz_matrix *ctm, int id);
 void fz_end_tile(fz_device *dev);
 
 fz_device *fz_new_device(fz_context *ctx, void *user);

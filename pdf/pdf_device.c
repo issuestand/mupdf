@@ -402,7 +402,7 @@ pdf_dev_ctm(pdf_device *pdev, const fz_matrix *ctm)
 	fz_matrix inverse;
 	gstate *gs = CURRENT_GSTATE(pdev);
 
-	if (memcmp(&gs->ctm, ctm, sizeof(ctm)) == 0)
+	if (memcmp(&gs->ctm, ctm, sizeof(*ctm)) == 0)
 		return;
 	fz_invert_matrix(&inverse, &gs->ctm);
 	fz_concat(&inverse, ctm, &inverse);
@@ -507,7 +507,7 @@ pdf_dev_alpha(pdf_device *pdev, float alpha, int stroke)
 		fz_try(ctx)
 		{
 			char text[32];
-			pdf_dict_puts_drop(o, (stroke ? "ca" : "CA"), pdf_new_real(ctx, alpha));
+			pdf_dict_puts_drop(o, (stroke ? "CA" : "ca"), pdf_new_real(ctx, alpha));
 			ref = pdf_new_ref(pdev->xref, o);
 			snprintf(text, sizeof(text), "ExtGState/Alp%d", i);
 			pdf_dict_putp(pdev->resources, text, ref);
@@ -890,7 +890,6 @@ pdf_dev_fill_text(fz_device *dev, fz_text *text, const fz_matrix *ctm,
 	fz_colorspace *colorspace, float *color, float alpha)
 {
 	pdf_device *pdev = dev->user;
-	gstate *gs = CURRENT_GSTATE(pdev);
 
 	pdf_dev_begin_text(pdev, &text->trm, 0);
 	pdf_dev_font(pdev, text->font, 1);
@@ -902,7 +901,6 @@ pdf_dev_stroke_text(fz_device *dev, fz_text *text, fz_stroke_state *stroke, cons
 	fz_colorspace *colorspace, float *color, float alpha)
 {
 	pdf_device *pdev = dev->user;
-	gstate *gs = CURRENT_GSTATE(pdev);
 
 	pdf_dev_begin_text(pdev, &text->trm, 1);
 	pdf_dev_font(pdev, text->font, 1);
@@ -913,7 +911,6 @@ static void
 pdf_dev_clip_text(fz_device *dev, fz_text *text, const fz_matrix *ctm, int accumulate)
 {
 	pdf_device *pdev = dev->user;
-	gstate *gs = CURRENT_GSTATE(pdev);
 
 	pdf_dev_begin_text(pdev, &text->trm, 0);
 	pdf_dev_font(pdev, text->font, 7);
@@ -924,7 +921,6 @@ static void
 pdf_dev_clip_stroke_text(fz_device *dev, fz_text *text, fz_stroke_state *stroke, const fz_matrix *ctm)
 {
 	pdf_device *pdev = dev->user;
-	gstate *gs = CURRENT_GSTATE(pdev);
 
 	pdf_dev_begin_text(pdev, &text->trm, 0);
 	pdf_dev_font(pdev, text->font, 5);
@@ -935,7 +931,6 @@ static void
 pdf_dev_ignore_text(fz_device *dev, fz_text *text, const fz_matrix *ctm)
 {
 	pdf_device *pdev = dev->user;
-	gstate *gs = CURRENT_GSTATE(pdev);
 
 	pdf_dev_begin_text(pdev, &text->trm, 0);
 	pdf_dev_font(pdev, text->font, 3);
@@ -1135,13 +1130,14 @@ pdf_dev_end_group(fz_device *dev)
 	pdf_drop_obj(form_ref);
 }
 
-static void
-pdf_dev_begin_tile(fz_device *dev, const fz_rect *area, const fz_rect *view, float xstep, float ystep, const fz_matrix *ctm)
+static int
+pdf_dev_begin_tile(fz_device *dev, const fz_rect *area, const fz_rect *view, float xstep, float ystep, const fz_matrix *ctm, int id)
 {
 	pdf_device *pdev = (pdf_device *)dev->user;
 
 	/* FIXME */
 	pdf_dev_end_text(pdev);
+	return 0;
 }
 
 static void
@@ -1224,6 +1220,7 @@ fz_device *pdf_new_pdf_device(pdf_document *doc, pdf_obj *contents, pdf_obj *res
 		if (pdev->gstates)
 			fz_drop_buffer(ctx, pdev->gstates[0].buf);
 		fz_free(ctx, pdev);
+		fz_rethrow(ctx);
 	}
 
 	dev->free_user = pdf_dev_free_user;

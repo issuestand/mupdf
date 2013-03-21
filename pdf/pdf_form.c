@@ -3,21 +3,10 @@
 
 #define MATRIX_COEFS (6)
 
-enum
-{
-	Ff_Multiline = 1 << (13-1),
-	Ff_Password = 1 << (14-1),
-	Ff_NoToggleToOff = 1 << (15-1),
-	Ff_Radio = 1 << (16-1),
-	Ff_Pushbutton = 1 << (17-1),
-	Ff_Combo = 1 << (18-1),
-	Ff_FileSelect = 1 << (21-1),
-	Ff_MultiSelect = 1 << (22-1),
-	Ff_DoNotSpellCheck = 1 << (23-1),
-	Ff_DoNotScroll = 1 << (24-1),
-	Ff_Comb = 1 << (25-1),
-	Ff_RadioInUnison = 1 << (26-1)
-};
+#define STRIKE_HEIGHT (0.375f)
+#define UNDERLINE_HEIGHT (0.075f)
+#define LINE_THICKNESS (0.07f)
+#define SMALL_FLOAT (0.00001)
 
 enum
 {
@@ -128,22 +117,6 @@ static void account_for_rot(fz_rect *rect, fz_matrix *mat, int rot)
 	}
 }
 
-static pdf_obj *get_inheritable(pdf_document *doc, pdf_obj *obj, char *key)
-{
-	pdf_obj *fobj = NULL;
-
-	while (!fobj && obj)
-	{
-		fobj = pdf_dict_gets(obj, key);
-
-		if (!fobj)
-			obj = pdf_dict_gets(obj, "Parent");
-	}
-
-	return fobj ? fobj
-				: pdf_dict_gets(pdf_dict_gets(pdf_dict_gets(doc->trailer, "Root"), "AcroForm"), key);
-}
-
 static char *get_string_or_stream(pdf_document *doc, pdf_obj *obj)
 {
 	fz_context *ctx = doc->ctx;
@@ -185,43 +158,6 @@ static char *get_string_or_stream(pdf_document *doc, pdf_obj *obj)
 	}
 
 	return text;
-}
-
-static char *get_field_type_name(pdf_document *doc, pdf_obj *obj)
-{
-	return pdf_to_name(get_inheritable(doc, obj, "FT"));
-}
-
-static int get_field_flags(pdf_document *doc, pdf_obj *obj)
-{
-	return pdf_to_int(get_inheritable(doc, obj, "Ff"));
-}
-
-int pdf_field_type(pdf_document *doc, pdf_obj *obj)
-{
-	char *type = get_field_type_name(doc, obj);
-	int flags = get_field_flags(doc, obj);
-
-	if (!strcmp(type, "Btn"))
-	{
-		if (flags & Ff_Pushbutton)
-			return FZ_WIDGET_TYPE_PUSHBUTTON;
-		else if (flags & Ff_Radio)
-			return FZ_WIDGET_TYPE_RADIOBUTTON;
-		else
-			return FZ_WIDGET_TYPE_CHECKBOX;
-	}
-	else if (!strcmp(type, "Tx"))
-		return FZ_WIDGET_TYPE_TEXT;
-	else if (!strcmp(type, "Ch"))
-	{
-		if (flags & Ff_Combo)
-			return FZ_WIDGET_TYPE_COMBOBOX;
-		else
-			return FZ_WIDGET_TYPE_LISTBOX;
-	}
-	else
-		return FZ_WIDGET_TYPE_NOT_WIDGET;
 }
 
 /* Find the point in a field hierarchy where all descendents
@@ -383,13 +319,13 @@ static void font_info_fin(fz_context *ctx, font_info *font_rec)
 
 static void get_text_widget_info(pdf_document *doc, pdf_obj *widget, text_widget_info *info)
 {
-	char *da = pdf_to_str_buf(get_inheritable(doc, widget, "DA"));
-	int ff = get_field_flags(doc, widget);
-	pdf_obj *ml = get_inheritable(doc, widget, "MaxLen");
+	char *da = pdf_to_str_buf(pdf_get_inheritable(doc, widget, "DA"));
+	int ff = pdf_get_field_flags(doc, widget);
+	pdf_obj *ml = pdf_get_inheritable(doc, widget, "MaxLen");
 
-	info->dr = get_inheritable(doc, widget, "DR");
+	info->dr = pdf_get_inheritable(doc, widget, "DR");
 	info->col = pdf_dict_getp(widget, "MK/BG");
-	info->q = pdf_to_int(get_inheritable(doc, widget, "Q"));
+	info->q = pdf_to_int(pdf_get_inheritable(doc, widget, "Q"));
 	info->multiline = (ff & Ff_Multiline) != 0;
 	info->comb = (ff & (Ff_Multiline|Ff_Password|Ff_FileSelect|Ff_Comb)) == Ff_Comb;
 
@@ -1187,7 +1123,7 @@ static pdf_xobject *load_or_create_form(pdf_document *doc, pdf_obj *obj, fz_rect
 			pdf_update_xobject_contents(doc, form, fzbuf);
 		}
 
-		copy_resources(form->resources, get_inheritable(doc, obj, "DR"));
+		copy_resources(form->resources, pdf_get_inheritable(doc, obj, "DR"));
 	}
 	fz_always(ctx)
 	{
@@ -1335,7 +1271,7 @@ static void update_combobox_appearance(pdf_document *doc, pdf_obj *obj)
 	{
 		get_text_widget_info(doc, obj, &info);
 
-		val = get_inheritable(doc, obj, "V");
+		val = pdf_get_inheritable(doc, obj, "V");
 
 		if (pdf_is_array(val))
 			val = pdf_array_get(val, 0);
@@ -1463,7 +1399,7 @@ static void update_pushbutton_appearance(pdf_document *doc, pdf_obj *obj)
 			fz_rect clip = rect;
 			fz_rect bounds;
 			fz_matrix mat;
-			char *da = pdf_to_str_buf(get_inheritable(doc, obj, "DA"));
+			char *da = pdf_to_str_buf(pdf_get_inheritable(doc, obj, "DA"));
 			char *text = pdf_to_str_buf(tobj);
 
 			clip.x0 += btotal;
@@ -1564,7 +1500,7 @@ static void reset_field(pdf_document *doc, pdf_obj *field)
 		case FZ_WIDGET_TYPE_RADIOBUTTON:
 		case FZ_WIDGET_TYPE_CHECKBOX:
 			{
-				pdf_obj *leafv = get_inheritable(doc, field, "V");
+				pdf_obj *leafv = pdf_get_inheritable(doc, field, "V");
 
 				if (leafv)
 					pdf_keep_obj(leafv);
@@ -1782,12 +1718,55 @@ static void execute_action(pdf_document *doc, pdf_obj *obj, pdf_obj *a)
 	}
 }
 
+static void update_text_markup_appearance(pdf_document *doc, pdf_obj *annot, fz_annot_type type)
+{
+	fz_context *ctx = doc->ctx;
+	float color[3];
+	float alpha;
+	float line_height;
+	float line_thickness;
+
+	switch (type)
+	{
+		case FZ_ANNOT_HIGHLIGHT:
+			color[0] = 1.0;
+			color[1] = 1.0;
+			color[2] = 0.0;
+			alpha = 0.5;
+			line_thickness = 1.0;
+			line_height = 0.5;
+			break;
+		case FZ_ANNOT_UNDERLINE:
+			color[0] = 0.0;
+			color[1] = 0.0;
+			color[2] = 1.0;
+			alpha = 1.0;
+			line_thickness = LINE_THICKNESS;
+			line_height = UNDERLINE_HEIGHT;
+			break;
+		case FZ_ANNOT_STRIKEOUT:
+			color[0] = 1.0;
+			color[1] = 0.0;
+			color[2] = 0.0;
+			alpha = 1.0;
+			line_thickness = LINE_THICKNESS;
+			line_height = STRIKE_HEIGHT;
+			break;
+		default:
+			return;
+	}
+
+	pdf_set_markup_obj_appearance(doc, annot, color, alpha, line_thickness, line_height);
+}
+
 void pdf_update_appearance(pdf_document *doc, pdf_obj *obj)
 {
 	if (!pdf_dict_gets(obj, "AP") || pdf_dict_gets(obj, "Dirty"))
 	{
-		if (!strcmp(pdf_to_name(pdf_dict_gets(obj, "Subtype")), "Widget"))
+		fz_annot_type type = pdf_annot_obj_type(obj);
+		switch (type)
 		{
+		case FZ_ANNOT_WIDGET:
 			switch(pdf_field_type(doc, obj))
 			{
 			case FZ_WIDGET_TYPE_TEXT:
@@ -1822,6 +1801,12 @@ void pdf_update_appearance(pdf_document *doc, pdf_obj *obj)
 				update_combobox_appearance(doc, obj);
 				break;
 			}
+			break;
+		case FZ_ANNOT_STRIKEOUT:
+		case FZ_ANNOT_UNDERLINE:
+		case FZ_ANNOT_HIGHLIGHT:
+			update_text_markup_appearance(doc, obj, type);
+			break;
 		}
 
 		pdf_dict_dels(obj, "Dirty");
@@ -1975,7 +1960,7 @@ static void toggle_check_box(pdf_document *doc, pdf_obj *obj)
 {
 	fz_context *ctx = doc->ctx;
 	pdf_obj *as = pdf_dict_gets(obj, "AS");
-	int ff = get_field_flags(doc, obj);
+	int ff = pdf_get_field_flags(doc, obj);
 	int radio = ((ff & (Ff_Pushbutton|Ff_Radio)) == Ff_Radio);
 	char *val = NULL;
 	pdf_obj *grp = radio ? pdf_dict_gets(obj, "Parent") : find_head_of_field_group(obj);
@@ -2131,7 +2116,7 @@ int pdf_pass_event(pdf_document *doc, pdf_page *page, fz_ui_event *ui_event)
 
 				if (annot)
 				{
-					switch(annot->type)
+					switch(annot->widget_type)
 					{
 					case FZ_WIDGET_TYPE_RADIOBUTTON:
 					case FZ_WIDGET_TYPE_CHECKBOX:
@@ -2160,7 +2145,20 @@ void pdf_update_page(pdf_document *doc, pdf_page *page)
 	fz_context *ctx = doc->ctx;
 	pdf_annot *annot;
 
+	/* Reset changed_annots to empty */
 	page->changed_annots = NULL;
+
+	/*
+		Free all annots in tmp_annots, since these were
+		referenced only from changed_annots.
+	*/
+	if (page->tmp_annots)
+	{
+		pdf_free_annot(ctx, page->tmp_annots);
+		page->tmp_annots = NULL;
+	}
+
+	/* Add all changed annots to the list */
 	for (annot = page->annots; annot; annot = annot->next)
 	{
 		pdf_xobject *ap = pdf_keep_xobject(ctx, annot->ap);
@@ -2185,6 +2183,24 @@ void pdf_update_page(pdf_document *doc, pdf_page *page)
 			fz_rethrow(ctx);
 		}
 	}
+
+	/*
+		Add all deleted annots to the list, since these also
+		warrant a screen update
+	*/
+	for (annot = page->deleted_annots; annot; annot = annot->next)
+	{
+		annot->next_changed = page->changed_annots;
+		page->changed_annots = annot;
+	}
+
+	/*
+		Move deleted_annots to tmp_annots to keep them separate
+		from any future deleted ones. They cannot yet be freed
+		since they are linked into changed_annots
+	*/
+	page->tmp_annots = page->deleted_annots;
+	page->deleted_annots = NULL;
 }
 
 pdf_annot *pdf_poll_changed_annot(pdf_document *idoc, pdf_page *page)
@@ -2206,7 +2222,7 @@ fz_widget *pdf_first_widget(pdf_document *doc, pdf_page *page)
 {
 	pdf_annot *annot = page->annots;
 
-	while (annot && annot->type == FZ_WIDGET_TYPE_NOT_WIDGET)
+	while (annot && annot->widget_type == FZ_WIDGET_TYPE_NOT_WIDGET)
 		annot = annot->next;
 
 	return (fz_widget *)annot;
@@ -2219,7 +2235,7 @@ fz_widget *pdf_next_widget(fz_widget *previous)
 	if (annot)
 		annot = annot->next;
 
-	while (annot && annot->type == FZ_WIDGET_TYPE_NOT_WIDGET)
+	while (annot && annot->widget_type == FZ_WIDGET_TYPE_NOT_WIDGET)
 		annot = annot->next;
 
 	return (fz_widget *)annot;
@@ -2228,12 +2244,12 @@ fz_widget *pdf_next_widget(fz_widget *previous)
 int fz_widget_get_type(fz_widget *widget)
 {
 	pdf_annot *annot = (pdf_annot *)widget;
-	return annot->type;
+	return annot->widget_type;
 }
 
 char *pdf_field_value(pdf_document *doc, pdf_obj *field)
 {
-	return get_string_or_stream(doc, get_inheritable(doc, field, "V"));
+	return get_string_or_stream(doc, pdf_get_inheritable(doc, field, "V"));
 }
 
 static int set_text_field_value(pdf_document *doc, pdf_obj *field, char *text)
@@ -2547,7 +2563,7 @@ void pdf_field_set_text_color(pdf_document *doc, pdf_obj *field, pdf_obj *col)
 	fz_context *ctx = doc->ctx;
 	da_info di;
 	fz_buffer *fzbuf = NULL;
-	char *da = pdf_to_str_buf(get_inheritable(doc, field, "DA"));
+	char *da = pdf_to_str_buf(pdf_get_inheritable(doc, field, "DA"));
 	unsigned char *buf;
 	int len;
 	pdf_obj *daobj = NULL;
@@ -2621,7 +2637,7 @@ int pdf_text_widget_max_len(pdf_document *doc, fz_widget *tw)
 {
 	pdf_annot *annot = (pdf_annot *)tw;
 
-	return pdf_to_int(get_inheritable(doc, annot->obj, "MaxLen"));
+	return pdf_to_int(pdf_get_inheritable(doc, annot->obj, "MaxLen"));
 }
 
 int pdf_text_widget_content_type(pdf_document *doc, fz_widget *tw)
@@ -2734,7 +2750,7 @@ int pdf_choice_widget_is_multiselect(pdf_document *doc, fz_widget *tw)
 	{
 	case FZ_WIDGET_TYPE_LISTBOX:
 	case FZ_WIDGET_TYPE_COMBOBOX:
-		return (get_field_flags(doc, annot->obj) & Ff_MultiSelect) != 0;
+		return (pdf_get_field_flags(doc, annot->obj) & Ff_MultiSelect) != 0;
 	default:
 		return 0;
 	}

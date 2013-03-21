@@ -32,6 +32,10 @@
 
 #define MAX_SEARCH_HITS (500)
 #define NUM_CACHE (3)
+#define STRIKE_HEIGHT (0.375f)
+#define UNDERLINE_HEIGHT (0.075f)
+#define LINE_THICKNESS (0.07f)
+#define SMALL_FLOAT (0.00001)
 
 enum
 {
@@ -1360,120 +1364,133 @@ JNI_FN(MuPDFCore_textAsHtml)(JNIEnv * env, jobject thiz)
 }
 
 JNIEXPORT void JNICALL
-JNI_FN(MuPDFCore_addStrikeOutAnnotationInternal)(JNIEnv * env, jobject thiz, jobjectArray lines)
+JNI_FN(MuPDFCore_addMarkupAnnotationInternal)(JNIEnv * env, jobject thiz, jobjectArray points, fz_annot_type type)
 {
 	globals *glo = get_globals(env, thiz);
 	fz_context *ctx = glo->ctx;
 	fz_document *doc = glo->doc;
 	fz_interactive *idoc = fz_interact(doc);
 	page_cache *pc = &glo->pages[glo->current];
-	jclass rect_cls;
-	jfieldID x0_fid, y0_fid, x1_fid, y1_fid;
+	jclass pt_cls;
+	jfieldID x_fid, y_fid;
 	int i, n;
-	fz_path *path = NULL;
-	fz_stroke_state *stroke = NULL;
-	fz_device *dev = NULL;
-	fz_display_list *strike_list;
+	fz_point *pts = NULL;
+	float color[3];
+	float alpha;
+	float line_height;
+	float line_thickness;
 
 	if (idoc == NULL)
 		return;
 
-	strike_list = fz_new_display_list(ctx);
+	switch (type)
+	{
+		case FZ_ANNOT_HIGHLIGHT:
+			color[0] = 1.0;
+			color[1] = 1.0;
+			color[2] = 0.0;
+			alpha = 0.5;
+			line_thickness = 1.0;
+			line_height = 0.5;
+			break;
+		case FZ_ANNOT_UNDERLINE:
+			color[0] = 0.0;
+			color[1] = 0.0;
+			color[2] = 1.0;
+			alpha = 1.0;
+			line_thickness = LINE_THICKNESS;
+			line_height = UNDERLINE_HEIGHT;
+			break;
+		case FZ_ANNOT_STRIKEOUT:
+			color[0] = 1.0;
+			color[1] = 0.0;
+			color[2] = 0.0;
+			alpha = 1.0;
+			line_thickness = LINE_THICKNESS;
+			line_height = STRIKE_HEIGHT;
+			break;
+		default:
+			return;
+	}
 
-	fz_var(path);
-	fz_var(stroke);
-	fz_var(dev);
+	fz_var(pts);
 	fz_try(ctx)
 	{
 		fz_annot *annot;
 		fz_matrix ctm;
 
-		float color[3] = {1.0, 0.0, 0.0};
 		float zoom = glo->resolution / 72;
 		zoom = 1.0 / zoom;
 		fz_scale(&ctm, zoom, zoom);
-		LOGI("P1 %f", zoom);
-		rect_cls = (*env)->FindClass(env, "android.graphics.RectF");
-		if (rect_cls == NULL) fz_throw(ctx, "FindClass");
-		LOGI("P2");
-		x0_fid = (*env)->GetFieldID(env, rect_cls, "left", "F");
-		if (x0_fid == NULL) fz_throw(ctx, "GetFieldID(left)");
-		LOGI("P3");
-		y0_fid = (*env)->GetFieldID(env, rect_cls, "top", "F");
-		if (y0_fid == NULL) fz_throw(ctx, "GetFieldID(top)");
-		LOGI("P4");
-		x1_fid = (*env)->GetFieldID(env, rect_cls, "right", "F");
-		if (x1_fid == NULL) fz_throw(ctx, "GetFieldID(right)");
-		LOGI("P5");
-		y1_fid = (*env)->GetFieldID(env, rect_cls, "bottom", "F");
-		if (y1_fid == NULL) fz_throw(ctx, "GetFieldID(bottom)");
-		LOGI("P6");
+		pt_cls = (*env)->FindClass(env, "android.graphics.PointF");
+		if (pt_cls == NULL) fz_throw(ctx, "FindClass");
+		x_fid = (*env)->GetFieldID(env, pt_cls, "x", "F");
+		if (x_fid == NULL) fz_throw(ctx, "GetFieldID(x)");
+		y_fid = (*env)->GetFieldID(env, pt_cls, "y", "F");
+		if (y_fid == NULL) fz_throw(ctx, "GetFieldID(y)");
 
-		n = (*env)->GetArrayLength(env, lines);
-		LOGI("nlines=%d", n);
+		n = (*env)->GetArrayLength(env, points);
 
-		dev = fz_new_list_device(ctx, strike_list);
+		pts = fz_malloc_array(ctx, n, sizeof(fz_point));
 
 		for (i = 0; i < n; i++)
 		{
-			jobject line = (*env)->GetObjectArrayElement(env, lines, i);
-			float x0 = (*env)->GetFloatField(env, line, x0_fid);
-			float y0 = (*env)->GetFloatField(env, line, y0_fid);
-			float x1 = (*env)->GetFloatField(env, line, x1_fid);
-			float y1 = (*env)->GetFloatField(env, line, y1_fid);
-			float vcenter = (y0 + y1)/2;
-			float thickness = y1 - y0;
-
-			if (!stroke || stroke->linewidth != thickness)
-			{
-				if (stroke)
-				{
-					// assert(path)
-					fz_stroke_path(dev, path, stroke, &ctm, fz_device_rgb, color, 1.0);
-					LOGI("Path stroked");
-					fz_drop_stroke_state(ctx, stroke);
-					stroke = NULL;
-					fz_free_path(ctx, path);
-					path = NULL;
-				}
-
-				stroke = fz_new_stroke_state(ctx);
-				LOGI("thickness(%f)", thickness);
-				stroke->linewidth = thickness;
-				path = fz_new_path(ctx);
-			}
-
-			fz_moveto(ctx, path, x0, vcenter);
-			LOGI("moveto(%f,%f)", x0, vcenter);
-			fz_lineto(ctx, path, x1, vcenter);
-			LOGI("lineto(%f,%f)", x1, vcenter);
+			jobject opt = (*env)->GetObjectArrayElement(env, points, i);
+			pts[i].x = opt ? (*env)->GetFloatField(env, opt, x_fid) : 0.0f;
+			pts[i].y = opt ? (*env)->GetFloatField(env, opt, y_fid) : 0.0f;
+			fz_transform_point(&pts[i], &ctm);
 		}
 
-		if (stroke)
-		{
-			fz_stroke_path(dev, path, stroke, &ctm, fz_device_rgb, color, 1.0);
-			LOGI("Path stroked");
-		}
+		annot = fz_create_annot(idoc, pc->page, type);
 
-		annot = fz_create_annot(idoc, pc->page, FZ_ANNOT_STRIKEOUT);
-		fz_set_annot_appearance(idoc, annot, strike_list);
+		fz_set_markup_annot_quadpoints(idoc, annot, pts, n);
+		fz_set_markup_appearance(idoc, annot, color, alpha, line_thickness, line_height);
+
 		dump_annotation_display_lists(glo);
 	}
 	fz_always(ctx)
 	{
-		fz_free_device(dev);
-		fz_drop_stroke_state(ctx, stroke);
-		fz_free_path(ctx, path);
-		fz_free_display_list(ctx, strike_list);
+		fz_free(ctx, pts);
 	}
 	fz_catch(ctx)
 	{
-		fz_free_device(dev);
 		LOGE("addStrikeOutAnnotation: %s failed", ctx->error->message);
 		jclass cls = (*env)->FindClass(env, "java/lang/OutOfMemoryError");
 		if (cls != NULL)
 			(*env)->ThrowNew(env, cls, "Out of memory in MuPDFCore_searchPage");
 		(*env)->DeleteLocalRef(env, cls);
+	}
+}
+
+JNIEXPORT void JNICALL
+JNI_FN(MuPDFCore_deleteAnnotationInternal)(JNIEnv * env, jobject thiz, int annot_index)
+{
+	globals *glo = get_globals(env, thiz);
+	fz_context *ctx = glo->ctx;
+	fz_document *doc = glo->doc;
+	fz_interactive *idoc = fz_interact(doc);
+	page_cache *pc = &glo->pages[glo->current];
+	fz_annot *annot;
+	int i;
+
+	if (idoc == NULL)
+		return;
+
+	fz_try(ctx)
+	{
+	    annot = fz_first_annot(glo->doc, pc->page);
+	    for (i = 0; i < annot_index && annot; i++)
+	       annot = fz_next_annot(glo->doc, annot);
+
+	    if (annot)
+		{
+		    fz_delete_annot(idoc, pc->page, annot);
+			dump_annotation_display_lists(glo);
+		}
+	}
+	fz_catch(ctx)
+	{
+		LOGE("deleteAnnotationInternal: %s", ctx->error->message);
 	}
 }
 
@@ -1671,6 +1688,60 @@ JNI_FN(MuPDFCore_getWidgetAreasInternal)(JNIEnv * env, jobject thiz, int pageNum
 		if (rectF == NULL) return NULL;
 		(*env)->SetObjectArrayElement(env, arr, count, rectF);
 		(*env)->DeleteLocalRef(env, rectF);
+
+		count ++;
+	}
+
+	return arr;
+}
+
+JNIEXPORT jobjectArray JNICALL
+JNI_FN(MuPDFCore_getAnnotationsInternal)(JNIEnv * env, jobject thiz, int pageNumber)
+{
+	jclass annotClass;
+	jmethodID ctor;
+	jobjectArray arr;
+	jobject jannot;
+	fz_annot *annot;
+	fz_matrix ctm;
+	float zoom;
+	int count;
+	page_cache *pc;
+	globals *glo = get_globals(env, thiz);
+
+	annotClass = (*env)->FindClass(env, PACKAGENAME "/Annotation");
+	if (annotClass == NULL) return NULL;
+	ctor = (*env)->GetMethodID(env, annotClass, "<init>", "(FFFFI)V");
+	if (ctor == NULL) return NULL;
+
+	JNI_FN(MuPDFCore_gotoPageInternal)(env, thiz, pageNumber);
+	pc = &glo->pages[glo->current];
+	if (pc->number != pageNumber || pc->page == NULL)
+		return NULL;
+
+	zoom = glo->resolution / 72;
+	fz_scale(&ctm, zoom, zoom);
+
+	count = 0;
+	for (annot = fz_first_annot(glo->doc, pc->page); annot; annot = fz_next_annot(glo->doc, annot))
+		count ++;
+
+	arr = (*env)->NewObjectArray(env, count, annotClass, NULL);
+	if (arr == NULL) return NULL;
+
+	count = 0;
+	for (annot = fz_first_annot(glo->doc, pc->page); annot; annot = fz_next_annot(glo->doc, annot))
+	{
+		fz_rect rect;
+		fz_annot_type type = fz_get_annot_type(annot);
+		fz_bound_annot(glo->doc, annot, &rect);
+		fz_transform_rect(&rect, &ctm);
+
+		jannot = (*env)->NewObject(env, annotClass, ctor,
+				(float)rect.x0, (float)rect.y0, (float)rect.x1, (float)rect.y1, type);
+		if (jannot == NULL) return NULL;
+		(*env)->SetObjectArrayElement(env, arr, count, jannot);
+		(*env)->DeleteLocalRef(env, jannot);
 
 		count ++;
 	}

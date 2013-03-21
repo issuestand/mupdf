@@ -81,8 +81,8 @@ public class MuPDFReflowView extends WebView implements MuPDFView {
 	public void blank(int page) {
 	}
 
-	public boolean passClickEvent(float x, float y) {
-		return false;
+	public Hit passClickEvent(float x, float y) {
+		return Hit.Nothing;
 	}
 
 	public LinkInfo hitLink(float x, float y) {
@@ -99,13 +99,19 @@ public class MuPDFReflowView extends WebView implements MuPDFView {
 		return false;
 	}
 
-	public void strikeOutSelection() {
+	public void markupSelection(Annotation.Type type) {
 	}
 
 	public void setSearchBoxes(RectF[] searchBoxes) {
 	}
 
 	public void setLinkHighlighting(boolean f) {
+	}
+
+	public void deleteSelectedAnnotation() {
+	}
+
+	public void deselectAnnotation() {
 	}
 
 	public void setChangeReporter(Runnable reporter) {

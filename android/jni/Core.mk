@@ -19,6 +19,8 @@ endif
 ifdef NDK_PROFILER
 LOCAL_CFLAGS += -pg -DNDK_PROFILER -O2
 endif
+endif
+LOCAL_CFLAGS += -DAA_BITS=8
 
 LOCAL_C_INCLUDES := \
 	../thirdparty/jbig2dec \
@@ -104,6 +106,7 @@ LOCAL_SRC_FILES := \
 	$(MY_ROOT)/pdf/pdf_device.c \
 	$(MY_ROOT)/pdf/pdf_encoding.c \
 	$(MY_ROOT)/pdf/pdf_event.c \
+	$(MY_ROOT)/pdf/pdf_field.c \
 	$(MY_ROOT)/pdf/pdf_font.c \
 	$(MY_ROOT)/pdf/pdf_fontfile.c \
 	$(MY_ROOT)/pdf/pdf_form.c \

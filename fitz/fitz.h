@@ -64,12 +64,17 @@ int gettimeofday(struct timeval *tv, struct timezone *tz);
 #define isnan _isnan
 #define hypotf _hypotf
 
+#define fopen fopen_utf8
+
+FILE *fopen_utf8(const char *name, const char *mode);
+
 #else /* Unix or close enough */
 
 #include <unistd.h>
 
 #ifndef O_BINARY
 #define O_BINARY 0
+
 #endif
 
 #endif
@@ -111,6 +116,13 @@ int gettimeofday(struct timeval *tv, struct timezone *tz);
 #define restrict __restrict
 #else /* Unknown or ancient */
 #define restrict
+#endif
+
+/* noreturn is a GCC extension */
+#ifdef __GNUC__
+#define FZ_NORETURN __attribute__((noreturn))
+#else
+#define FZ_NORETURN
 #endif
 
 /*
@@ -194,6 +206,7 @@ static inline void *fz_clampp(void *p, void *min, void *max)
 
 typedef struct fz_alloc_context_s fz_alloc_context;
 typedef struct fz_error_context_s fz_error_context;
+typedef struct fz_id_context_s fz_id_context;
 typedef struct fz_warn_context_s fz_warn_context;
 typedef struct fz_font_context_s fz_font_context;
 typedef struct fz_aa_context_s fz_aa_context;
@@ -265,8 +278,8 @@ void fz_var_imp(void *);
 	if (ctx->error->stack[ctx->error->top--].code > 1)
 
 int fz_push_try(fz_error_context *ex);
-void fz_throw(fz_context *, const char *, ...) __printflike(2, 3);
-void fz_rethrow(fz_context *);
+void fz_throw(fz_context *, const char *, ...) __printflike(2, 3) FZ_NORETURN;
+void fz_rethrow(fz_context *) FZ_NORETURN;
 void fz_warn(fz_context *ctx, const char *fmt, ...) __printflike(2, 3);
 const char *fz_caught(fz_context *ctx);
 
@@ -287,6 +300,7 @@ struct fz_context_s
 {
 	fz_alloc_context *alloc;
 	fz_locks_context *locks;
+	fz_id_context *id;
 	fz_error_context *error;
 	fz_warn_context *warn;
 	fz_font_context *font;
@@ -633,7 +647,7 @@ int fz_strlcat(char *dst, const char *src, int n);
 
 	Returns the number of bytes consumed. Does not throw exceptions.
 */
-int fz_chartorune(int *rune, char *str);
+int fz_chartorune(int *rune, const char *str);
 
 /*
 	fz_runetochar: UTF8 encode a rune to a sequence of chars.
@@ -655,6 +669,12 @@ int fz_runetochar(char *str, int rune);
 	Returns the number of bytes required to represent this run in UTF8.
 */
 int fz_runelen(int rune);
+
+/*
+	fz_gen_id: Generate an id (guaranteed unique within this family of
+	contexts).
+*/
+int fz_gen_id(fz_context *ctx);
 
 /*
 	getopt: Simple functions/variables for use in tools.
@@ -1141,6 +1161,14 @@ fz_rect *fz_rect_from_irect(fz_rect *restrict rect, const fz_irect *restrict bbo
 	Does not throw exceptions.
 */
 fz_rect *fz_expand_rect(fz_rect *b, float expand);
+
+/*
+	fz_include_point_in_rect: Expand a bbox to include a given point.
+	To create a rectangle that encompasses a sequence of points, the
+	rectangle must first be set to be the empty rectangle at one of
+	the points before including the others.
+*/
+fz_rect *fz_include_point_in_rect(fz_rect *r, const fz_point *p);
 
 /*
 	fz_translate_irect: Translate bounding box.
@@ -2516,6 +2544,40 @@ fz_rect *fz_bound_page(fz_document *doc, fz_page *page, fz_rect *rect);
 	fz_annot: opaque pointer to annotation details.
 */
 typedef struct fz_annot_s fz_annot;
+
+typedef enum
+{
+	FZ_ANNOT_TEXT,
+	FZ_ANNOT_LINK,
+	FZ_ANNOT_FREETEXT,
+	FZ_ANNOT_LINE,
+	FZ_ANNOT_SQUARE,
+	FZ_ANNOT_CIRCLE,
+	FZ_ANNOT_POLYGON,
+	FZ_ANNOT_POLYLINE,
+	FZ_ANNOT_HIGHLIGHT,
+	FZ_ANNOT_UNDERLINE,
+	FZ_ANNOT_SQUIGGLY,
+	FZ_ANNOT_STRIKEOUT,
+	FZ_ANNOT_STAMP,
+	FZ_ANNOT_CARET,
+	FZ_ANNOT_INK,
+	FZ_ANNOT_POPUP,
+	FZ_ANNOT_FILEATTACHMENT,
+	FZ_ANNOT_SOUND,
+	FZ_ANNOT_MOVIE,
+	FZ_ANNOT_WIDGET,
+	FZ_ANNOT_SCREEN,
+	FZ_ANNOT_PRINTERMARK,
+	FZ_ANNOT_TRAPNET,
+	FZ_ANNOT_WATERMARK,
+	FZ_ANNOT_3D
+} fz_annot_type;
+
+/*
+	fz_get_annot_type: return the type of an annotation
+*/
+fz_annot_type fz_get_annot_type(fz_annot *annot);
 
 /*
 	fz_first_annot: Return a pointer to the first annotation on a page.

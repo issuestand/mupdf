@@ -20,6 +20,8 @@ ifdef NDK_PROFILER
 LOCAL_CFLAGS += -pg -DNDK_PROFILER -O0
 NDK_APP_CFLAGS :=
 endif
+endif
+LOCAL_CFLAGS += -DAA_BITS=8
 
 LOCAL_C_INCLUDES := \
 	../thirdparty/jbig2dec \
