@@ -380,7 +380,6 @@ xps_parse_glyphs(xps_document *doc, const fz_matrix *ctm,
 	char *opacity_mask_uri;
 
 	char *bidi_level_att;
-	char *caret_stops_att;
 	char *fill_att;
 	char *font_size_att;
 	char *font_uri_att;
@@ -425,7 +424,6 @@ xps_parse_glyphs(xps_document *doc, const fz_matrix *ctm,
 	 */
 
 	bidi_level_att = fz_xml_att(root, "BidiLevel");
-	caret_stops_att = fz_xml_att(root, "CaretStops");
 	fill_att = fz_xml_att(root, "Fill");
 	font_size_att = fz_xml_att(root, "FontRenderingEmSize");
 	font_uri_att = fz_xml_att(root, "FontUri");
@@ -573,7 +571,7 @@ xps_parse_glyphs(xps_document *doc, const fz_matrix *ctm,
 			fz_atof(origin_x_att), fz_atof(origin_y_att),
 			is_sideways, bidi_level, indices_att, unicode_att);
 
-	fz_bound_text(doc->ctx, text, &local_ctm, &area);
+	fz_bound_text(doc->ctx, text, NULL, &local_ctm, &area);
 
 	if (navigate_uri_att)
 		xps_add_link(doc, &area, base_uri, navigate_uri_att);

@@ -261,7 +261,9 @@ void fz_free_hash(fz_context *ctx, fz_hash_table *table);
 
 void *fz_hash_find(fz_context *ctx, fz_hash_table *table, void *key);
 void *fz_hash_insert(fz_context *ctx, fz_hash_table *table, void *key, void *val);
+void *fz_hash_insert_with_pos(fz_context *ctx, fz_hash_table *table, void *key, void *val, unsigned *pos);
 void fz_hash_remove(fz_context *ctx, fz_hash_table *table, void *key);
+void fz_hash_remove_fast(fz_context *ctx, fz_hash_table *table, void *key, unsigned pos);
 
 int fz_hash_len(fz_context *ctx, fz_hash_table *table);
 void *fz_hash_get_key(fz_context *ctx, fz_hash_table *table, int idx);
@@ -269,6 +271,7 @@ void *fz_hash_get_val(fz_context *ctx, fz_hash_table *table, int idx);
 
 #ifndef NDEBUG
 void fz_print_hash(fz_context *ctx, FILE *out, fz_hash_table *table);
+void fz_print_hash_details(fz_context *ctx, FILE *out, fz_hash_table *table, void (*details)(FILE *, void *));
 #endif
 
 /*
@@ -490,7 +493,7 @@ struct fz_store_type_s
 	void (*drop_key)(fz_context *,void *);
 	int (*cmp_key)(void *, void *);
 #ifndef NDEBUG
-	void (*debug)(void *);
+	void (*debug)(FILE *, void *);
 #endif
 };
 
@@ -585,6 +588,7 @@ int fz_store_scavenge(fz_context *ctx, unsigned int size, int *phase);
 */
 #ifndef NDEBUG
 void fz_print_store(fz_context *ctx, FILE *out);
+void fz_print_store_locked(fz_context *ctx, FILE *out);
 #endif
 
 struct fz_buffer_s
@@ -604,6 +608,16 @@ struct fz_buffer_s
 	failure.
 */
 fz_buffer *fz_new_buffer(fz_context *ctx, int capacity);
+
+/*
+	fz_new_buffer: Create a new buffer.
+
+	capacity: Initial capacity.
+
+	Returns pointer to new buffer. Throws exception on allocation
+	failure.
+*/
+fz_buffer *fz_new_buffer_from_data(fz_context *ctx, unsigned char *data, int size);
 
 /*
 	fz_resize_buffer: Ensure that a buffer has a given capacity,
@@ -644,7 +658,7 @@ void fz_trim_buffer(fz_context *ctx, fz_buffer *buf);
 */
 void fz_buffer_cat(fz_context *ctx, fz_buffer *buf, fz_buffer *extra);
 
-void fz_write_buffer(fz_context *ctx, fz_buffer *buf, unsigned char *data, int len);
+void fz_write_buffer(fz_context *ctx, fz_buffer *buf, const void *data, int len);
 
 void fz_write_buffer_byte(fz_context *ctx, fz_buffer *buf, int val);
 
@@ -785,6 +799,26 @@ static inline int fz_is_eof_bits(fz_stream *stm)
 	return fz_is_eof(stm) && (stm->avail == 0 || stm->bits == EOF);
 }
 
+static inline int fz_write_int32be(fz_output *out, int x)
+{
+	char data[4];
+
+	data[0] = x>>24;
+	data[1] = x>>16;
+	data[2] = x>>8;
+	data[3] = x;
+
+	return fz_write(out, data, 4);
+}
+
+static inline void
+fz_write_byte(fz_output *out, int x)
+{
+	char data = x;
+
+	fz_write(out, &data, 1);
+}
+
 /*
  * Data filters.
  */
@@ -812,8 +846,6 @@ fz_stream *fz_open_jbig2d(fz_stream *chain, fz_buffer *global);
  * Resources and other graphics related objects.
  */
 
-enum { FZ_MAX_COLORS = 32 };
-
 int fz_lookup_blendmode(char *name);
 char *fz_blendmode_name(int blendmode);
 
@@ -821,10 +853,11 @@ struct fz_bitmap_s
 {
 	int refs;
 	int w, h, stride, n;
+	int xres, yres;
 	unsigned char *samples;
 };
 
-fz_bitmap *fz_new_bitmap(fz_context *ctx, int w, int h, int n);
+fz_bitmap *fz_new_bitmap(fz_context *ctx, int w, int h, int n, int xres, int yres);
 
 void fz_bitmap_details(fz_bitmap *bitmap, int *w, int *h, int *n, int *stride);
 
@@ -911,7 +944,9 @@ enum
 	FZ_IMAGE_RAW = 5,
 	FZ_IMAGE_RLD = 6,
 	FZ_IMAGE_FLATE = 7,
-	FZ_IMAGE_LZW = 8
+	FZ_IMAGE_LZW = 8,
+	FZ_IMAGE_PNG = 9,
+	FZ_IMAGE_TIFF = 10
 };
 
 struct fz_compression_params_s
@@ -961,19 +996,40 @@ struct fz_compressed_buffer_s
 
 void fz_free_compressed_buffer(fz_context *ctx, fz_compressed_buffer *buf);
 
+fz_image *fz_new_image(fz_context *ctx, int w, int h, int bpc, fz_colorspace *colorspace, int xres, int yres, int interpolate, int imagemask, float *decode, int *colorkey, fz_compressed_buffer *buffer, fz_image *mask);
+fz_image *fz_new_image_from_pixmap(fz_context *ctx, fz_pixmap *pixmap, fz_image *mask);
+fz_image *fz_new_image_from_data(fz_context *ctx, unsigned char *data, int len);
+fz_image *fz_new_image_from_buffer(fz_context *ctx, fz_buffer *buffer);
+fz_pixmap *fz_image_get_pixmap(fz_context *ctx, fz_image *image, int w, int h);
+void fz_free_image(fz_context *ctx, fz_storable *image);
+fz_pixmap *fz_decomp_image_from_stream(fz_context *ctx, fz_stream *stm, fz_image *image, int in_line, int indexed, int l2factor, int native_l2factor);
+fz_pixmap *fz_expand_indexed_pixmap(fz_context *ctx, fz_pixmap *src);
+
 struct fz_image_s
 {
 	fz_storable storable;
-	int w, h;
+	int w, h, n, bpc;
 	fz_image *mask;
 	fz_colorspace *colorspace;
 	fz_pixmap *(*get_pixmap)(fz_context *, fz_image *, int w, int h);
+	fz_compressed_buffer *buffer;
+	int colorkey[FZ_MAX_COLORS * 2];
+	float decode[FZ_MAX_COLORS * 2];
+	int imagemask;
+	int interpolate;
+	int usecolorkey;
+	fz_pixmap *tile; /* Private to the implementation */
+	int xres; /* As given in the image, not necessarily as rendered */
+	int yres; /* As given in the image, not necessarily as rendered */
 };
 
 fz_pixmap *fz_load_jpx(fz_context *ctx, unsigned char *data, int size, fz_colorspace *cs, int indexed);
-fz_pixmap *fz_load_jpeg(fz_context *doc, unsigned char *data, int size);
-fz_pixmap *fz_load_png(fz_context *doc, unsigned char *data, int size);
-fz_pixmap *fz_load_tiff(fz_context *doc, unsigned char *data, int size);
+fz_pixmap *fz_load_png(fz_context *ctx, unsigned char *data, int size);
+fz_pixmap *fz_load_tiff(fz_context *ctx, unsigned char *data, int size);
+
+void fz_load_jpeg_info(fz_context *ctx, unsigned char *data, int size, int *w, int *h, int *xres, int *yres, fz_colorspace **cspace);
+void fz_load_png_info(fz_context *ctx, unsigned char *data, int size, int *w, int *h, int *xres, int *yres, fz_colorspace **cspace);
+void fz_load_tiff_info(fz_context *ctx, unsigned char *data, int size, int *w, int *h, int *xres, int *yres, fz_colorspace **cspace);
 
 struct fz_halftone_s
 {
@@ -1000,11 +1056,16 @@ struct fz_colorspace_s
 };
 
 fz_colorspace *fz_new_colorspace(fz_context *ctx, char *name, int n);
+fz_colorspace *fz_new_indexed_colorspace(fz_context *ctx, fz_colorspace *base, int high, unsigned char *lookup);
 fz_colorspace *fz_keep_colorspace(fz_context *ctx, fz_colorspace *colorspace);
 void fz_drop_colorspace(fz_context *ctx, fz_colorspace *colorspace);
 void fz_free_colorspace_imp(fz_context *ctx, fz_storable *colorspace);
 
 void fz_convert_color(fz_context *ctx, fz_colorspace *dsts, float *dstv, fz_colorspace *srcs, float *srcv);
+
+void fz_new_colorspace_context(fz_context *ctx);
+fz_colorspace_context *fz_keep_colorspace_context(fz_context *ctx);
+void fz_drop_colorspace_context(fz_context *ctx);
 
 typedef struct fz_color_converter_s fz_color_converter;
 
@@ -1020,7 +1081,7 @@ struct fz_color_converter_s
 	fz_colorspace *ss;
 };
 
-void fz_find_color_converter(fz_color_converter *cc, fz_context *ctx, fz_colorspace *ds, fz_colorspace *ss);
+void fz_lookup_color_converter(fz_color_converter *cc, fz_context *ctx, fz_colorspace *ds, fz_colorspace *ss);
 
 /*
  * Fonts come in two variants:
@@ -1165,8 +1226,8 @@ void fz_transform_path(fz_context *ctx, fz_path *path, const fz_matrix *transfor
 
 fz_path *fz_clone_path(fz_context *ctx, fz_path *old);
 
-fz_rect *fz_bound_path(fz_context *ctx, fz_path *path, fz_stroke_state *stroke, const fz_matrix *ctm, fz_rect *r);
-fz_rect *fz_adjust_rect_for_stroke(fz_rect *r, fz_stroke_state *stroke, const fz_matrix *ctm);
+fz_rect *fz_bound_path(fz_context *ctx, fz_path *path, const fz_stroke_state *stroke, const fz_matrix *ctm, fz_rect *r);
+fz_rect *fz_adjust_rect_for_stroke(fz_rect *r, const fz_stroke_state *stroke, const fz_matrix *ctm);
 
 fz_stroke_state *fz_new_stroke_state(fz_context *ctx);
 fz_stroke_state *fz_new_stroke_state_with_len(fz_context *ctx, int len);
@@ -1228,6 +1289,12 @@ void fz_set_markup_annot_quadpoints(fz_interactive *idoc, fz_annot *annot, fz_po
 void fz_set_markup_appearance(fz_interactive *idoc, fz_annot *annot, float color[3], float alpha, float line_thickness, float line_height);
 
 /*
+	fz_set_ink_annot_list: set the details of an ink annotation. All the points of the multiple arcs
+	are carried in a single array, with the counts for each arc held in a secondary array.
+*/
+void fz_set_ink_annot_list(fz_interactive *idoc, fz_annot *annot, fz_point *pts, int *counts, int ncount, float color[3], float thickness);
+
+/*
  * Text buffer.
  *
  * The trm field contains the a, b, c and d coefficients.
@@ -1261,9 +1328,41 @@ struct fz_text_s
 fz_text *fz_new_text(fz_context *ctx, fz_font *face, const fz_matrix *trm, int wmode);
 void fz_add_text(fz_context *ctx, fz_text *text, int gid, int ucs, float x, float y);
 void fz_free_text(fz_context *ctx, fz_text *text);
-fz_rect *fz_bound_text(fz_context *ctx, fz_text *text, const fz_matrix *ctm, fz_rect *r);
+fz_rect *fz_bound_text(fz_context *ctx, fz_text *text, const fz_stroke_state *stroke, const fz_matrix *ctm, fz_rect *r);
 fz_text *fz_clone_text(fz_context *ctx, fz_text *old);
 void fz_print_text(fz_context *ctx, FILE *out, fz_text*);
+
+/*
+ * The generic function support.
+ */
+
+typedef struct fz_function_s fz_function;
+
+void fz_eval_function(fz_context *ctx, fz_function *func, float *in, int inlen, float *out, int outlen);
+fz_function *fz_keep_function(fz_context *ctx, fz_function *func);
+void fz_drop_function(fz_context *ctx, fz_function *func);
+unsigned int fz_function_size(fz_function *func);
+#ifndef DEBUG
+void pdf_debug_function(fz_function *func);
+#endif
+
+enum
+{
+	FZ_FN_MAXN = FZ_MAX_COLORS,
+	FZ_FN_MAXM = FZ_MAX_COLORS
+};
+
+struct fz_function_s
+{
+	fz_storable storable;
+	unsigned int size;
+	int m;					/* number of input values */
+	int n;					/* number of output values */
+	void (*evaluate)(fz_context *ctx, fz_function *func, float *in, float *out);
+#ifndef NDEBUG
+	void (*debug)(fz_function *func);
+#endif
+};
 
 /*
  * The shading code uses gouraud shaded triangle meshes.
@@ -1355,6 +1454,7 @@ struct fz_mesh_processor_s {
 	fz_shade *shade;
 	fz_mesh_process_fn *process;
 	void *process_arg;
+	int ncomp;
 };
 
 void fz_process_mesh(fz_context *ctx, fz_shade *shade, const fz_matrix *ctm,
@@ -1381,8 +1481,10 @@ int fz_is_rect_gel(fz_gel *gel);
 void fz_scan_convert(fz_gel *gel, int eofill, const fz_irect *clip, fz_pixmap *pix, unsigned char *colorbv);
 
 void fz_flatten_fill_path(fz_gel *gel, fz_path *path, const fz_matrix *ctm, float flatness);
-void fz_flatten_stroke_path(fz_gel *gel, fz_path *path, fz_stroke_state *stroke, const fz_matrix *ctm, float flatness, float linewidth);
-void fz_flatten_dash_path(fz_gel *gel, fz_path *path, fz_stroke_state *stroke, const fz_matrix *ctm, float flatness, float linewidth);
+void fz_flatten_stroke_path(fz_gel *gel, fz_path *path, const fz_stroke_state *stroke, const fz_matrix *ctm, float flatness, float linewidth);
+void fz_flatten_dash_path(fz_gel *gel, fz_path *path, const fz_stroke_state *stroke, const fz_matrix *ctm, float flatness, float linewidth);
+
+fz_irect *fz_bound_path_accurate(fz_context *ctx, fz_irect *bbox, const fz_irect *scissor, fz_path *path, const fz_stroke_state *stroke, const fz_matrix *ctm, float flatness, float linewidth);
 
 /*
  * The device interface.
@@ -1392,10 +1494,6 @@ fz_device *fz_new_draw_device_type3(fz_context *ctx, fz_pixmap *dest);
 
 enum
 {
-	/* Hints */
-	FZ_IGNORE_IMAGE = 1,
-	FZ_IGNORE_SHADE = 2,
-
 	/* Flags */
 	FZ_DEVFLAG_MASK = 1,
 	FZ_DEVFLAG_COLOR = 2,

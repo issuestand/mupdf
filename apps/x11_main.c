@@ -63,6 +63,7 @@ void windrawstringxor(pdfapp_t *app, int x, int y, char *s);
 void cleanup(pdfapp_t *app);
 
 static Display *xdpy;
+static Atom XA_CLIPBOARD;
 static Atom XA_TARGETS;
 static Atom XA_TIMESTAMP;
 static Atom XA_UTF8_STRING;
@@ -79,6 +80,7 @@ static int mapped = 0;
 static Cursor xcarrow, xchand, xcwait, xccaret;
 static int justcopied = 0;
 static int dirty = 0;
+static int transition_dirty = 0;
 static int dirtysearch = 0;
 static char *password = "";
 static XColor xbgcolor;
@@ -173,6 +175,7 @@ static void winopen(void)
 	if (!xdpy)
 		fz_throw(gapp.ctx, "cannot open display");
 
+	XA_CLIPBOARD = XInternAtom(xdpy, "CLIPBOARD", False);
 	XA_TARGETS = XInternAtom(xdpy, "TARGETS", False);
 	XA_TIMESTAMP = XInternAtom(xdpy, "TIMESTAMP", False);
 	XA_UTF8_STRING = XInternAtom(xdpy, "UTF8_STRING", False);
@@ -504,6 +507,8 @@ static void winblit(pdfapp_t *app)
 void winrepaint(pdfapp_t *app)
 {
 	dirty = 1;
+	if (app->in_transit)
+		transition_dirty = 1;
 }
 
 void winrepaintsearch(pdfapp_t *app)
@@ -549,7 +554,7 @@ void windrawstring(pdfapp_t *app, int x, int y, char *s)
 	XDrawString(xdpy, xwin, xgc, x, y, s, strlen(s));
 }
 
-void windocopy(pdfapp_t *app)
+void docopy(pdfapp_t *app, Atom copy_target)
 {
 	unsigned short copyucs2[16 * 1024];
 	char *latin1 = copylatin1;
@@ -574,9 +579,14 @@ void windocopy(pdfapp_t *app)
 	*utf8 = 0;
 	*latin1 = 0;
 
-	XSetSelectionOwner(xdpy, XA_PRIMARY, xwin, copytime);
+	XSetSelectionOwner(xdpy, copy_target, xwin, copytime);
 
 	justcopied = 1;
+}
+
+void windocopy(pdfapp_t *app)
+{
+	docopy(app, XA_PRIMARY);
 }
 
 void onselreq(Window requestor, Atom selection, Atom target, Atom property, Time time)
@@ -779,7 +789,7 @@ int main(int argc, char **argv)
 
 	while (!closing)
 	{
-		while (!closing && XPending(xdpy) && !dirty)
+		while (!closing && XPending(xdpy) && !transition_dirty)
 		{
 			XNextEvent(xdpy, &xevt);
 
@@ -832,7 +842,9 @@ int main(int argc, char **argv)
 						len = 1; buf[0] = '.';
 						break;
 					}
-				if (len)
+				if (xevt.xkey.state & ControlMask && keysym == XK_c)
+					docopy(&gapp, XA_CLIPBOARD);
+				else if (len)
 					onkey(buf[0]);
 
 				onmouse(oldx, oldy, 0, 0, 0);
@@ -886,6 +898,7 @@ int main(int argc, char **argv)
 			else if (dirtysearch)
 				winblitsearch(&gapp);
 			dirty = 0;
+			transition_dirty = 0;
 			dirtysearch = 0;
 			pdfapp_postblit(&gapp);
 		}
@@ -899,7 +912,7 @@ int main(int argc, char **argv)
 			timeradd(&now, &tmo, &tmo_at);
 		}
 
-		if (XPending(xdpy) || dirty)
+		if (XPending(xdpy) || transition_dirty)
 			continue;
 
 		timeout = NULL;

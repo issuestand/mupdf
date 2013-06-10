@@ -9,25 +9,6 @@ void *pdf_get_indirect_document(pdf_obj *obj);
 void pdf_set_int(pdf_obj *obj, int i);
 
 /*
- * PDF Images
- */
-
-typedef struct pdf_image_s pdf_image;
-
-struct pdf_image_s
-{
-	fz_image base;
-	fz_pixmap *tile;
-	int n, bpc;
-	fz_compressed_buffer *buffer;
-	int colorkey[FZ_MAX_COLORS * 2];
-	float decode[FZ_MAX_COLORS * 2];
-	int imagemask;
-	int interpolate;
-	int usecolorkey;
-};
-
-/*
  * tokenizer and low-level object parser
  */
 
@@ -76,7 +57,7 @@ void pdf_lexbuf_init(fz_context *ctx, pdf_lexbuf *lexbuf, int size);
 void pdf_lexbuf_fin(pdf_lexbuf *lexbuf);
 ptrdiff_t pdf_lexbuf_grow(pdf_lexbuf *lexbuf);
 
-int pdf_lex(fz_stream *f, pdf_lexbuf *lexbuf);
+pdf_token pdf_lex(fz_stream *f, pdf_lexbuf *lexbuf);
 
 pdf_obj *pdf_parse_array(pdf_document *doc, fz_stream *f, pdf_lexbuf *buf);
 pdf_obj *pdf_parse_dict(pdf_document *doc, fz_stream *f, pdf_lexbuf *buf);
@@ -138,6 +119,13 @@ struct pdf_hotspot_s
 
 typedef struct pdf_js_s pdf_js;
 
+typedef struct pdf_xref_s
+{
+	int len;
+	pdf_xref_entry *table;
+	pdf_obj *trailer;
+} pdf_xref;
+
 struct pdf_document_s
 {
 	fz_document super;
@@ -149,12 +137,12 @@ struct pdf_document_s
 	int startxref;
 	int file_size;
 	pdf_crypt *crypt;
-	pdf_obj *trailer;
 	pdf_ocg_descriptor *ocg;
 	pdf_hotspot hotspot;
 
-	int len;
-	pdf_xref_entry *table;
+	int num_xref_sections;
+	pdf_xref *xref_sections;
+	int xref_altered;
 
 	int page_len;
 	int page_cap;
@@ -192,9 +180,15 @@ fz_buffer *pdf_load_raw_renumbered_stream(pdf_document *doc, int num, int gen, i
 fz_buffer *pdf_load_renumbered_stream(pdf_document *doc, int num, int gen, int orig_num, int orig_gen, int *truncated);
 fz_stream *pdf_open_raw_renumbered_stream(pdf_document *doc, int num, int gen, int orig_num, int orig_gen);
 
+pdf_obj *pdf_trailer(pdf_document *doc);
+void pdf_set_populating_xref_trailer(pdf_document *doc, pdf_obj *trailer);
+int pdf_xref_len(pdf_document *doc);
+pdf_xref_entry *pdf_get_populating_xref_entry(pdf_document *doc, int i);
+pdf_xref_entry *pdf_get_xref_entry(pdf_document *doc, int i);
+void pdf_replace_xref(pdf_document *doc, pdf_xref_entry *entries, int n);
+
 void pdf_repair_xref(pdf_document *doc, pdf_lexbuf *buf);
 void pdf_repair_obj_stms(pdf_document *doc);
-void pdf_resize_xref(pdf_document *doc, int newcap);
 pdf_obj *pdf_new_ref(pdf_document *doc, pdf_obj *obj);
 
 void pdf_print_xref(pdf_document *);
@@ -225,16 +219,9 @@ void pdf_print_crypt(pdf_crypt *crypt);
  * Functions, Colorspaces, Shadings and Images
  */
 
-typedef struct pdf_function_s pdf_function;
-
-pdf_function *pdf_load_function(pdf_document *doc, pdf_obj *ref, int in, int out);
-void pdf_eval_function(fz_context *ctx, pdf_function *func, float *in, int inlen, float *out, int outlen);
-pdf_function *pdf_keep_function(fz_context *ctx, pdf_function *func);
-void pdf_drop_function(fz_context *ctx, pdf_function *func);
-unsigned int pdf_function_size(pdf_function *func);
+fz_function *pdf_load_function(pdf_document *doc, pdf_obj *ref, int in, int out);
 
 fz_colorspace *pdf_load_colorspace(pdf_document *doc, pdf_obj *obj);
-fz_pixmap *pdf_expand_indexed_pixmap(fz_context *ctx, fz_pixmap *src);
 
 fz_shade *pdf_load_shading(pdf_document *doc, pdf_obj *obj);
 
@@ -608,12 +595,16 @@ int pdf_choice_widget_options(pdf_document *doc, fz_widget *tw, char *opts[]);
 int pdf_choice_widget_is_multiselect(pdf_document *doc, fz_widget *tw);
 int pdf_choice_widget_value(pdf_document *doc, fz_widget *tw, char *opts[]);
 void pdf_choice_widget_set_value(pdf_document *doc, fz_widget *tw, int n, char *opts[]);
+int pdf_signature_widget_byte_range(pdf_document *doc, fz_widget *widget, int (*byte_range)[2]);
+int pdf_signature_widget_contents(pdf_document *doc, fz_widget *widget, char **contents);
 pdf_annot *pdf_create_annot(pdf_document *doc, pdf_page *page, fz_annot_type type);
 void pdf_delete_annot(pdf_document *doc, pdf_page *page, pdf_annot *annot);
 void pdf_set_annot_appearance(pdf_document *doc, pdf_annot *annot, fz_rect *rect, fz_display_list *disp_list);
 void pdf_set_markup_annot_quadpoints(pdf_document *doc, pdf_annot *annot, fz_point *qp, int n);
 void pdf_set_markup_obj_appearance(pdf_document *doc, pdf_obj *annot, float color[3], float alpha, float line_thickness, float line_height);
 void pdf_set_markup_appearance(pdf_document *doc, pdf_annot *annot, float color[3], float alpha, float line_thickness, float line_height);
+void pdf_set_ink_annot_list(pdf_document *doc, pdf_annot *annot, fz_point *pts, int *counts, int ncount, float color[3], float thickness);
+void pdf_set_ink_obj_appearance(pdf_document *doc, pdf_obj *annot);
 void pdf_set_doc_event_callback(pdf_document *doc, fz_doc_event_cb *event_cb, void *data);
 
 void pdf_event_issue_alert(pdf_document *doc, fz_alert_event *event);
@@ -633,7 +624,7 @@ typedef struct pdf_js_event_s
 	int rc;
 } pdf_js_event;
 
-int pdf_js_supported();
+int pdf_js_supported(void);
 pdf_js *pdf_new_js(pdf_document *doc);
 void pdf_drop_js(pdf_js *js);
 void pdf_js_load_document_level(pdf_js *js);

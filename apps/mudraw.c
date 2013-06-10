@@ -12,6 +12,70 @@
 
 enum { TEXT_PLAIN = 1, TEXT_HTML = 2, TEXT_XML = 3 };
 
+enum { OUT_PNG, OUT_PPM, OUT_PNM, OUT_PAM, OUT_PGM, OUT_PBM, OUT_SVG, OUT_PWG, OUT_PCL };
+
+enum { CS_INVALID, CS_UNSET, CS_MONO, CS_GRAY, CS_GRAYALPHA, CS_RGB, CS_RGBA };
+
+typedef struct
+{
+	char *suffix;
+	int format;
+} suffix_t;
+
+static const suffix_t suffix_table[] =
+{
+	{ ".png", OUT_PNG },
+	{ ".pgm", OUT_PGM },
+	{ ".ppm", OUT_PPM },
+	{ ".pnm", OUT_PNM },
+	{ ".pam", OUT_PAM },
+	{ ".pbm", OUT_PBM },
+	{ ".svg", OUT_SVG },
+	{ ".pwg", OUT_PWG },
+	{ ".pcl", OUT_PCL }
+};
+
+typedef struct
+{
+	char *name;
+	int colorspace;
+} cs_name_t;
+
+static const cs_name_t cs_name_table[] =
+{
+	{ "m", CS_MONO },
+	{ "mono", CS_MONO },
+	{ "g", CS_GRAY },
+	{ "gray", CS_GRAY },
+	{ "grey", CS_GRAY },
+	{ "ga", CS_GRAYALPHA },
+	{ "grayalpha", CS_GRAYALPHA },
+	{ "greyalpha", CS_GRAYALPHA },
+	{ "rgb", CS_RGB },
+	{ "rgba", CS_RGBA },
+	{ "rgbalpha", CS_RGBA }
+};
+
+typedef struct
+{
+	int format;
+	int default_cs;
+	int permitted_cs[6];
+} format_cs_table_t;
+
+static const format_cs_table_t format_cs_table[] =
+{
+	{ OUT_PNG, CS_RGB, { CS_GRAY, CS_GRAYALPHA, CS_RGB, CS_RGBA } },
+	{ OUT_PPM, CS_RGB, { CS_GRAY, CS_RGB } },
+	{ OUT_PNM, CS_GRAY, { CS_GRAY, CS_RGB } },
+	{ OUT_PAM, CS_RGBA, { CS_RGBA } },
+	{ OUT_PGM, CS_GRAY, { CS_GRAY, CS_RGB } },
+	{ OUT_PBM, CS_MONO, { CS_MONO } },
+	{ OUT_SVG, CS_RGB, { CS_RGB } },
+	{ OUT_PWG, CS_RGB, { CS_MONO, CS_GRAY, CS_RGB } },
+	{ OUT_PCL, CS_MONO, { CS_MONO } }
+};
+
 /*
 	A useful bit of bash script to call this to generate mjs files:
 	for f in tests_private/pdf/forms/v1.3/ *.pdf ; do g=${f%.*} ; echo $g ; ../mupdf.git/win32/debug/mudraw.exe -j $g.mjs $g.pdf ; done
@@ -72,7 +136,6 @@ static int showtext = 0;
 static int showtime = 0;
 static int showmd5 = 0;
 static int showoutline = 0;
-static int savealpha = 0;
 static int uselist = 1;
 static int alphabits = 8;
 static float gamma_value = 1;
@@ -82,6 +145,9 @@ static int height = 0;
 static int fit = 0;
 static int errored = 0;
 static int ignore_errors = 0;
+static int output_format;
+static int append = 0;
+static int out_cs = CS_UNSET;
 
 static fz_text_sheet *sheet = NULL;
 static fz_colorspace *colorspace;
@@ -112,7 +178,7 @@ static void usage(void)
 		"\t-w -\twidth (in pixels) (maximum width if -r is specified)\n"
 		"\t-h -\theight (in pixels) (maximum height if -r is specified)\n"
 		"\t-f -\tfit width and/or height exactly (ignore aspect)\n"
-		"\t-a\tsave alpha channel (only pam and png)\n"
+		"\t-c -\tcolorspace {mono,gray,grayalpha,rgb,rgba}\n"
 		"\t-b -\tnumber of bits of antialiasing (0 to 8)\n"
 		"\t-g\trender in grayscale\n"
 		"\t-m\tshow timing information\n"
@@ -121,7 +187,7 @@ static void usage(void)
 		"\t-d\tdisable use of display list\n"
 		"\t-5\tshow md5 checksums\n"
 		"\t-R -\trotate clockwise by given number of degrees\n"
-		"\t-G gamma\tgamma correct output\n"
+		"\t-G -\tgamma correct output\n"
 		"\t-I\tinvert output\n"
 		"\t-l\tprint outline\n"
 		"\t-j -\tOutput mujstest file\n"
@@ -364,6 +430,8 @@ static void drawpage(fz_context *ctx, fz_document *doc, int pagenum)
 			fz_rect bounds;
 			text = fz_new_text_page(ctx, fz_bound_page(doc, page, &bounds));
 			dev = fz_new_text_device(ctx, sheet, text);
+			if (showtext == TEXT_HTML)
+				fz_disable_device_hints(dev, FZ_IGNORE_IMAGE);
 			if (list)
 				fz_run_display_list(list, dev, &fz_identity, &fz_infinite_rect, &cookie);
 			else
@@ -376,6 +444,7 @@ static void drawpage(fz_context *ctx, fz_document *doc, int pagenum)
 			}
 			else if (showtext == TEXT_HTML)
 			{
+				fz_analyze_text(ctx, sheet, text);
 				fz_print_text_page_html(ctx, out, text);
 			}
 			else if (showtext == TEXT_PLAIN)
@@ -401,7 +470,53 @@ static void drawpage(fz_context *ctx, fz_document *doc, int pagenum)
 	if (showmd5 || showtime)
 		printf("page %s %d", filename, pagenum);
 
-	if (output || showmd5 || showtime)
+	if (output && output_format == OUT_SVG)
+	{
+		float zoom;
+		fz_matrix ctm;
+		fz_rect bounds, tbounds;
+		char buf[512];
+		FILE *file;
+		fz_output *out;
+
+		sprintf(buf, output, pagenum);
+		file = fopen(buf, "wb");
+		if (file == NULL)
+			fz_throw(ctx, "cannot open file '%s': %s", buf, strerror(errno));
+		out = fz_new_output_with_file(ctx, file);
+
+		fz_bound_page(doc, page, &bounds);
+		zoom = resolution / 72;
+		fz_pre_rotate(fz_scale(&ctm, zoom, zoom), rotation);
+		tbounds = bounds;
+		fz_transform_rect(&tbounds, &ctm);
+
+		fz_try(ctx)
+		{
+			dev = fz_new_svg_device(ctx, out, tbounds.x1-tbounds.x0, tbounds.y1-tbounds.y0);
+			if (list)
+				fz_run_display_list(list, dev, &ctm, &tbounds, &cookie);
+			else
+				fz_run_page(doc, page, dev, &ctm, &cookie);
+			fz_free_device(dev);
+			dev = NULL;
+		}
+		fz_always(ctx)
+		{
+			fz_free_device(dev);
+			dev = NULL;
+			fz_close_output(out);
+			fclose(file);
+		}
+		fz_catch(ctx)
+		{
+			fz_free_display_list(ctx, list);
+			fz_free_page(doc, page);
+			fz_rethrow(ctx);
+		}
+	}
+
+	if ((output && output_format != OUT_SVG)|| showmd5 || showtime)
 	{
 		float zoom;
 		fz_matrix ctm;
@@ -475,8 +590,11 @@ static void drawpage(fz_context *ctx, fz_document *doc, int pagenum)
 
 		fz_try(ctx)
 		{
-			pix = fz_new_pixmap_with_bbox(ctx, colorspace, &ibounds);
+			int savealpha = (out_cs == CS_RGBA || out_cs == CS_GRAYALPHA);
 
+			pix = fz_new_pixmap_with_bbox(ctx, colorspace, &ibounds);
+			fz_pixmap_set_resolution(pix, resolution);
+			
 			if (savealpha)
 				fz_clear_pixmap(ctx, pix);
 			else
@@ -502,13 +620,45 @@ static void drawpage(fz_context *ctx, fz_document *doc, int pagenum)
 			{
 				char buf[512];
 				sprintf(buf, output, pagenum);
-				if (strstr(output, ".pgm") || strstr(output, ".ppm") || strstr(output, ".pnm"))
+				if (output_format == OUT_PGM || output_format == OUT_PPM || output_format == OUT_PNM)
 					fz_write_pnm(ctx, pix, buf);
-				else if (strstr(output, ".pam"))
+				else if (output_format == OUT_PAM)
 					fz_write_pam(ctx, pix, buf, savealpha);
-				else if (strstr(output, ".png"))
+				else if (output_format == OUT_PNG)
 					fz_write_png(ctx, pix, buf, savealpha);
-				else if (strstr(output, ".pbm")) {
+				else if (output_format == OUT_PWG)
+				{
+					if (strstr(output, "%d") != NULL)
+						append = 0;
+					if (out_cs == CS_MONO)
+					{
+						fz_bitmap *bit = fz_halftone_pixmap(ctx, pix, NULL);
+						fz_write_pwg_bitmap(ctx, bit, buf, append, NULL);
+						fz_drop_bitmap(ctx, bit);
+					}
+					else
+						fz_write_pwg(ctx, pix, buf, append, NULL);
+					append = 1;
+				}
+				else if (output_format == OUT_PCL)
+				{
+					fz_pcl_options options;
+
+					fz_pcl_preset(ctx, &options, "ljet4");
+				    
+					if (strstr(output, "%d") != NULL)
+						append = 0;
+					if (out_cs == CS_MONO)
+					{
+						fz_bitmap *bit = fz_halftone_pixmap(ctx, pix, NULL);
+						fz_write_pcl_bitmap(ctx, bit, buf, append, &options);
+						fz_drop_bitmap(ctx, bit);
+					}
+					else
+						fz_write_pcl(ctx, pix, buf, append, &options);
+					append = 1;
+				}
+				else if (output_format == OUT_PBM) {
 					fz_bitmap *bit = fz_halftone_pixmap(ctx, pix, NULL);
 					fz_write_pbm(ctx, bit, buf);
 					fz_drop_bitmap(ctx, bit);
@@ -628,7 +778,7 @@ static void drawoutline(fz_context *ctx, fz_document *doc)
 	fz_var(out);
 	fz_try(ctx)
 	{
-		out = fz_new_output_file(ctx, stdout);
+		out = fz_new_output_with_file(ctx, stdout);
 		if (showoutline > 1)
 			fz_print_outline_xml(ctx, out, outline);
 		else
@@ -645,6 +795,21 @@ static void drawoutline(fz_context *ctx, fz_document *doc)
 	}
 }
 
+static int
+parse_colorspace(const char *name)
+{
+	int i;
+
+	for (i = 0; i < nelem(cs_name_table); i++)
+	{
+		if (!strcmp(name, cs_name_table[i].name))
+			return cs_name_table[i].colorspace;
+	}
+	fprintf(stderr, "Unknown colorspace \"%s\"\n", name);
+	exit(1);
+	return -1;
+}
+
 #ifdef MUPDF_COMBINED_EXE
 int draw_main(int argc, char **argv)
 #else
@@ -656,14 +821,13 @@ int main(int argc, char **argv)
 #endif
 {
 	char *password = "";
-	int grayscale = 0;
 	fz_document *doc = NULL;
 	int c;
 	fz_context *ctx;
 
 	fz_var(doc);
 
-	while ((c = fz_getopt(argc, argv, "lo:p:r:R:ab:dgmtx5G:Iw:h:fij:")) != -1)
+	while ((c = fz_getopt(argc, argv, "lo:p:r:R:b:c:dgmtx5G:Iw:h:fij:")) != -1)
 	{
 		switch (c)
 		{
@@ -671,15 +835,15 @@ int main(int argc, char **argv)
 		case 'p': password = fz_optarg; break;
 		case 'r': resolution = atof(fz_optarg); res_specified = 1; break;
 		case 'R': rotation = atof(fz_optarg); break;
-		case 'a': savealpha = 1; break;
 		case 'b': alphabits = atoi(fz_optarg); break;
 		case 'l': showoutline++; break;
 		case 'm': showtime++; break;
 		case 't': showtext++; break;
 		case 'x': showxml++; break;
 		case '5': showmd5++; break;
-		case 'g': grayscale++; break;
+		case 'g': out_cs = CS_GRAY; break;
 		case 'd': uselist = 0; break;
+		case 'c': out_cs = parse_colorspace(fz_optarg); break;
 		case 'G': gamma_value = atof(fz_optarg); break;
 		case 'w': width = atof(fz_optarg); break;
 		case 'h': height = atof(fz_optarg); break;
@@ -717,15 +881,65 @@ int main(int argc, char **argv)
 
 	fz_set_aa_level(ctx, alphabits);
 
-	colorspace = fz_device_rgb;
-	if (output && strstr(output, ".pgm"))
-		colorspace = fz_device_gray;
-	if (output && strstr(output, ".ppm"))
-		colorspace = fz_device_rgb;
-	if (output && strstr(output, ".pbm"))
-		colorspace = fz_device_gray;
-	if (grayscale)
-		colorspace = fz_device_gray;
+	/* Determine output type */
+	output_format = OUT_PNG;
+	if (output)
+	{
+		char *suffix = output;
+		int i;
+
+		for (i = 0; i < nelem(suffix_table); i++)
+		{
+			char *s = strstr(suffix, suffix_table[i].suffix);
+
+			if (s != NULL)
+			{
+				suffix = s+1;
+				output_format = suffix_table[i].format;
+				i = 0;
+			}
+		}
+	}
+
+	{
+		int i, j;
+
+		for (i = 0; i < nelem(format_cs_table); i++)
+		{
+			if (format_cs_table[i].format == output_format)
+			{
+				if (out_cs == CS_UNSET)
+					out_cs = format_cs_table[i].default_cs;
+				for (j = 0; j < nelem(format_cs_table[i].permitted_cs); j++)
+				{
+					if (format_cs_table[i].permitted_cs[j] == out_cs)
+						break;
+				}
+				if (j == nelem(format_cs_table[i].permitted_cs))
+				{
+					fprintf(stderr, "Unsupported colorspace for this format\n");
+					exit(1);
+				}
+			}
+		}
+	}
+
+	switch (out_cs)
+	{
+	case CS_MONO:
+	case CS_GRAY:
+	case CS_GRAYALPHA:
+		colorspace = fz_device_gray(ctx);
+		break;
+	case CS_RGB:
+	case CS_RGBA:
+		colorspace = fz_device_rgb(ctx);
+		break;
+	default:
+		fprintf(stderr, "Unknown colorspace!\n");
+		exit(1);
+		break;
+	}
 
 	timing.count = 0;
 	timing.total = 0;
@@ -737,7 +951,7 @@ int main(int argc, char **argv)
 	timing.maxfilename = "";
 
 	if (showxml || showtext)
-		out = fz_new_output_file(ctx, stdout);
+		out = fz_new_output_with_file(ctx, stdout);
 
 	if (showxml || showtext == TEXT_XML)
 		fz_printf(out, "<?xml version=\"1.0\"?>\n");
@@ -748,10 +962,13 @@ int main(int argc, char **argv)
 	if (showtext == TEXT_HTML)
 	{
 		fz_printf(out, "<style>\n");
-		fz_printf(out, "body{background-color:gray;margin:12tp;}\n");
+		fz_printf(out, "body{background-color:gray;margin:12pt;}\n");
 		fz_printf(out, "div.page{background-color:white;margin:6pt;padding:6pt;}\n");
 		fz_printf(out, "div.block{border:1px solid gray;margin:6pt;padding:6pt;}\n");
-		fz_printf(out, "p{margin:0;padding:0;}\n");
+		fz_printf(out, "div.metaline{display:table;width:100%%}\n");
+		fz_printf(out, "div.line{display:table-row;padding:6pt}\n");
+		fz_printf(out, "div.cell{display:table-cell;padding-left:6pt;padding-right:6pt}\n");
+		fz_printf(out, "p{margin:0pt;padding:0pt;}\n");
 		fz_printf(out, "</style>\n");
 		fz_printf(out, "<body>\n");
 	}

@@ -193,6 +193,33 @@ pdf_parse_link_dest(pdf_document *xref, pdf_obj *dest)
 	return ld;
 }
 
+static char *
+pdf_parse_file_spec(pdf_document *xref, pdf_obj *file_spec)
+{
+	fz_context *ctx = xref->ctx;
+	pdf_obj *filename;
+
+	if (pdf_is_string(file_spec))
+		return pdf_to_utf8(xref, file_spec);
+
+	if (pdf_is_dict(file_spec)) {
+		filename = pdf_dict_gets(file_spec, "UF");
+		if (!filename)
+			filename = pdf_dict_gets(file_spec, "F");
+		if (!filename)
+			filename = pdf_dict_gets(file_spec, "Unix");
+		if (!filename)
+			filename = pdf_dict_gets(file_spec, "Mac");
+		if (!filename)
+			filename = pdf_dict_gets(file_spec, "DOS");
+
+		return pdf_to_utf8(xref, filename);
+	}
+
+	fz_warn(ctx, "cannot parse file specification");
+	return NULL;
+}
+
 fz_link_dest
 pdf_parse_action(pdf_document *xref, pdf_obj *action)
 {
@@ -221,11 +248,9 @@ pdf_parse_action(pdf_document *xref, pdf_obj *action)
 	}
 	else if (!strcmp(pdf_to_name(obj), "Launch"))
 	{
-		dest = pdf_dict_gets(action, "F");
 		ld.kind = FZ_LINK_LAUNCH;
-		if (pdf_is_dict(dest))
-			dest = pdf_dict_gets(dest, "F");
-		ld.ld.launch.file_spec = pdf_to_utf8(xref, dest);
+		dest = pdf_dict_gets(action, "F");
+		ld.ld.launch.file_spec = pdf_parse_file_spec(xref, dest);
 		ld.ld.launch.new_window = pdf_to_int(pdf_dict_gets(action, "NewWindow"));
 	}
 	else if (!strcmp(pdf_to_name(obj), "Named"))
@@ -238,7 +263,8 @@ pdf_parse_action(pdf_document *xref, pdf_obj *action)
 		dest = pdf_dict_gets(action, "D");
 		ld = pdf_parse_link_dest(xref, dest);
 		ld.kind = FZ_LINK_GOTOR;
-		ld.ld.gotor.file_spec = pdf_to_utf8(xref, pdf_dict_gets(action, "F"));
+		dest = pdf_dict_gets(action, "F");
+		ld.ld.gotor.file_spec = pdf_parse_file_spec(xref, dest);
 		ld.ld.gotor.new_window = pdf_to_int(pdf_dict_gets(action, "NewWindow"));
 	}
 	return ld;
@@ -768,6 +794,25 @@ pdf_delete_annot(pdf_document *doc, pdf_page *page, pdf_annot *annot)
 	doc->dirty = 1;
 }
 
+static fz_colorspace *pdf_to_color(pdf_document *doc, pdf_obj *col, float color[4])
+{
+	fz_colorspace *cs;
+	int i, ncol = pdf_array_len(col);
+
+	switch (ncol)
+	{
+	case 1: cs = fz_device_gray(doc->ctx); break;
+	case 3: cs = fz_device_rgb(doc->ctx); break;
+	case 4: cs = fz_device_cmyk(doc->ctx); break;
+	default: return NULL;
+	}
+
+	for (i = 0; i < ncol; i++)
+		color[i] = pdf_to_real(pdf_array_get(col, i));
+
+	return cs;
+}
+
 static fz_point *
 quadpoints(pdf_document *doc, pdf_obj *annot, int *nout)
 {
@@ -831,6 +876,70 @@ pdf_set_markup_annot_quadpoints(pdf_document *doc, pdf_annot *annot, fz_point *q
 	}
 }
 
+static void update_rect(fz_context *ctx, pdf_annot *annot)
+{
+	pdf_to_rect(ctx, pdf_dict_gets(annot->obj, "Rect"), &annot->rect);
+	annot->pagerect = annot->rect;
+	fz_transform_rect(&annot->pagerect, &annot->page->ctm);
+}
+
+void
+pdf_set_ink_annot_list(pdf_document *doc, pdf_annot *annot, fz_point *pts, int *counts, int ncount, float color[3], float thickness)
+{
+	fz_context *ctx = doc->ctx;
+	fz_matrix ctm;
+	pdf_obj *list = pdf_new_array(ctx, ncount);
+	pdf_obj *bs, *col;
+	fz_rect rect;
+	int i, k = 0;
+
+	fz_invert_matrix(&ctm, &annot->page->ctm);
+
+	pdf_dict_puts_drop(annot->obj, "InkList", list);
+
+	for (i = 0; i < ncount; i++)
+	{
+		int j;
+		pdf_obj *arc = pdf_new_array(ctx, counts[i]);
+
+		pdf_array_push_drop(list, arc);
+
+		for (j = 0; j < counts[i]; j++)
+		{
+			fz_point pt = pts[k];
+
+			fz_transform_point(&pt, &ctm);
+
+			if (i == 0 && j == 0)
+			{
+				rect.x0 = rect.x1 = pt.x;
+				rect.y0 = rect.y1 = pt.y;
+			}
+			else
+			{
+				fz_include_point_in_rect(&rect, &pt);
+			}
+
+			pdf_array_push_drop(arc, pdf_new_real(ctx, pt.x));
+			pdf_array_push_drop(arc, pdf_new_real(ctx, pt.y));
+			k++;
+		}
+	}
+
+	fz_expand_rect(&rect, thickness);
+	pdf_dict_puts_drop(annot->obj, "Rect", pdf_new_rect(ctx, &rect));
+	update_rect(ctx, annot);
+
+	bs = pdf_new_dict(ctx, 1);
+	pdf_dict_puts_drop(annot->obj, "BS", bs);
+	pdf_dict_puts_drop(bs, "W", pdf_new_real(ctx, thickness));
+
+	col = pdf_new_array(ctx, 3);
+	pdf_dict_puts_drop(annot->obj, "C", col);
+	for (i = 0; i < 3; i++)
+		pdf_array_push_drop(col, pdf_new_real(ctx, color[i]));
+}
+
 void
 pdf_set_annot_obj_appearance(pdf_document *doc, pdf_obj *obj, const fz_matrix *page_ctm, fz_rect *rect, fz_display_list *disp_list)
 {
@@ -887,13 +996,6 @@ pdf_set_annot_obj_appearance(pdf_document *doc, pdf_obj *obj, const fz_matrix *p
 		fz_free_device(dev);
 		fz_rethrow(ctx);
 	}
-}
-
-static void update_rect(fz_context *ctx, pdf_annot *annot)
-{
-	pdf_to_rect(ctx, pdf_dict_gets(annot->obj, "Rect"), &annot->rect);
-	annot->pagerect = annot->rect;
-	fz_transform_rect(&annot->pagerect, &annot->page->ctm);
 }
 
 void
@@ -955,7 +1057,7 @@ pdf_set_markup_obj_appearance(pdf_document *doc, pdf_obj *annot, float color[3],
 				if (stroke)
 				{
 					// assert(path)
-					fz_stroke_path(dev, path, stroke, &fz_identity, fz_device_rgb, color, alpha);
+					fz_stroke_path(dev, path, stroke, &fz_identity, fz_device_rgb(ctx), color, alpha);
 					fz_drop_stroke_state(ctx, stroke);
 					stroke = NULL;
 					fz_free_path(ctx, path);
@@ -973,7 +1075,7 @@ pdf_set_markup_obj_appearance(pdf_document *doc, pdf_obj *annot, float color[3],
 
 		if (stroke)
 		{
-			fz_stroke_path(dev, path, stroke, &fz_identity, fz_device_rgb, color, alpha);
+			fz_stroke_path(dev, path, stroke, &fz_identity, fz_device_rgb(ctx), color, alpha);
 		}
 
 		pdf_set_annot_obj_appearance(doc, annot, &fz_identity, &rect, strike_list);
@@ -981,6 +1083,98 @@ pdf_set_markup_obj_appearance(pdf_document *doc, pdf_obj *annot, float color[3],
 	fz_always(ctx)
 	{
 		fz_free(ctx, qp);
+		fz_free_device(dev);
+		fz_drop_stroke_state(ctx, stroke);
+		fz_free_path(ctx, path);
+		fz_free_display_list(ctx, strike_list);
+	}
+	fz_catch(ctx)
+	{
+		fz_rethrow(ctx);
+	}
+}
+
+void
+pdf_set_ink_obj_appearance(pdf_document *doc, pdf_obj *annot)
+{
+	fz_context *ctx = doc->ctx;
+	fz_path *path = NULL;
+	fz_stroke_state *stroke = NULL;
+	fz_device *dev = NULL;
+	fz_display_list *strike_list = NULL;
+
+	fz_var(path);
+	fz_var(stroke);
+	fz_var(dev);
+	fz_var(strike_list);
+	fz_try(ctx)
+	{
+		fz_rect rect = fz_empty_rect;
+		fz_colorspace *cs;
+		float color[4];
+		float width;
+		pdf_obj *list;
+		int n, m, i, j;
+
+		cs = pdf_to_color(doc, pdf_dict_gets(annot, "C"), color);
+		if (!cs)
+		{
+			cs = fz_device_rgb(ctx);
+			color[0] = 1.0f;
+			color[1] = 0.0f;
+			color[2] = 0.0f;
+		}
+
+		width = pdf_to_real(pdf_dict_gets(pdf_dict_gets(annot, "BS"), "W"));
+		if (width == 0.0f)
+			width = 1.0f;
+
+		list = pdf_dict_gets(annot, "InkList");
+
+		n = pdf_array_len(list);
+
+		strike_list = fz_new_display_list(ctx);
+		dev = fz_new_list_device(ctx, strike_list);
+		path = fz_new_path(ctx);
+		stroke = fz_new_stroke_state(ctx);
+		stroke->linewidth = width;
+
+		for (i = 0; i < n; i ++)
+		{
+			pdf_obj *arc = pdf_array_get(list, i);
+			m = pdf_array_len(arc);
+
+			for (j = 0; j < m-1; j += 2)
+			{
+				fz_point pt;
+				pt.x = pdf_to_real(pdf_array_get(arc, j));
+				pt.y = pdf_to_real(pdf_array_get(arc, j+1));
+
+				if (i == 0 && j == 0)
+				{
+					rect.x0 = rect.x1 = pt.x;
+					rect.y0 = rect.y1 = pt.y;
+				}
+				else
+				{
+					fz_include_point_in_rect(&rect, &pt);
+				}
+
+				if (j == 0)
+					fz_moveto(ctx, path, pt.x, pt.y);
+				else
+					fz_lineto(ctx, path, pt.x, pt.y);
+			}
+		}
+
+		fz_stroke_path(dev, path, stroke, &fz_identity, cs, color, 1.0f);
+
+		fz_expand_rect(&rect, width);
+
+		pdf_set_annot_obj_appearance(doc, annot, &fz_identity, &rect, strike_list);
+	}
+	fz_always(ctx)
+	{
 		fz_free_device(dev);
 		fz_drop_stroke_state(ctx, stroke);
 		fz_free_path(ctx, path);

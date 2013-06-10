@@ -44,7 +44,7 @@ public class ChoosePDFActivity extends ListActivity {
 			builder.setTitle(R.string.no_media_warning);
 			builder.setMessage(R.string.no_media_hint);
 			AlertDialog alert = builder.create();
-			alert.setButton(AlertDialog.BUTTON_POSITIVE,"Dismiss",
+			alert.setButton(AlertDialog.BUTTON_POSITIVE,getString(R.string.dismiss),
 					new OnClickListener() {
 						public void onClick(DialogInterface dialog, int which) {
 							finish();
@@ -68,7 +68,7 @@ public class ChoosePDFActivity extends ListActivity {
 				Resources res = getResources();
 				String appName = res.getString(R.string.app_name);
 				String version = res.getString(R.string.version);
-				String title = res.getString(R.string.picker_title);
+				String title = res.getString(R.string.picker_title_App_Ver_Dir);
 				setTitle(String.format(title, appName, version, mDirectory));
 
 				mParent = mDirectory.getParentFile();
@@ -94,6 +94,22 @@ public class ChoosePDFActivity extends ListActivity {
 							return true;
 						if (fname.endsWith(".cbz"))
 							return true;
+						if (fname.endsWith(".png"))
+							return true;
+						if (fname.endsWith(".jpe"))
+							return true;
+						if (fname.endsWith(".jpeg"))
+							return true;
+						if (fname.endsWith(".jpg"))
+							return true;
+						if (fname.endsWith(".jfif"))
+							return true;
+						if (fname.endsWith(".jfif-tbnl"))
+							return true;
+						if (fname.endsWith(".tif"))
+							return true;
+						if (fname.endsWith(".tiff"))
+							return true;
 						return false;
 					}
 				});
@@ -114,7 +130,7 @@ public class ChoosePDFActivity extends ListActivity {
 
 				adapter.clear();
 				if (mParent != null)
-					adapter.add(new ChoosePDFItem(ChoosePDFItem.Type.PARENT, "[Up one level]"));
+					adapter.add(new ChoosePDFItem(ChoosePDFItem.Type.PARENT, getString(R.string.parent_directory)));
 				for (File f : mDirs)
 					adapter.add(new ChoosePDFItem(ChoosePDFItem.Type.DIR, f.getName()));
 				for (File f : mFiles)

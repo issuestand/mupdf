@@ -515,8 +515,19 @@ retry_unhinted:
 		return NULL;
 	}
 
-	result = fz_copy_ft_bitmap(ctx, face->glyph->bitmap_left, face->glyph->bitmap_top, &face->glyph->bitmap);
-	fz_unlock(ctx, FZ_LOCK_FREETYPE);
+	fz_try(ctx)
+	{
+		result = fz_copy_ft_bitmap(ctx, face->glyph->bitmap_left, face->glyph->bitmap_top, &face->glyph->bitmap);
+	}
+	fz_always(ctx)
+	{
+		fz_unlock(ctx, FZ_LOCK_FREETYPE);
+	}
+	fz_catch(ctx)
+	{
+		fz_rethrow(ctx);
+	}
+
 	return result;
 }
 
@@ -623,9 +634,19 @@ fz_render_ft_stroked_glyph(fz_context *ctx, fz_font *font, int gid, const fz_mat
 	}
 
 	bitmap = (FT_BitmapGlyph)glyph;
-	pixmap = fz_copy_ft_bitmap(ctx, bitmap->left, bitmap->top, &bitmap->bitmap);
-	FT_Done_Glyph(glyph);
-	fz_unlock(ctx, FZ_LOCK_FREETYPE);
+	fz_try(ctx)
+	{
+		pixmap = fz_copy_ft_bitmap(ctx, bitmap->left, bitmap->top, &bitmap->bitmap);
+	}
+	fz_always(ctx)
+	{
+		FT_Done_Glyph(glyph);
+		fz_unlock(ctx, FZ_LOCK_FREETYPE);
+	}
+	fz_catch(ctx)
+	{
+		fz_rethrow(ctx);
+	}
 
 	return pixmap;
 }
@@ -954,7 +975,7 @@ fz_render_t3_glyph(fz_context *ctx, fz_font *font, int gid, const fz_matrix *trm
 	fz_irect_from_rect(&bbox, &bounds);
 	fz_intersect_irect(&bbox, &scissor);
 
-	glyph = fz_new_pixmap_with_bbox(ctx, model ? model : fz_device_gray, &bbox);
+	glyph = fz_new_pixmap_with_bbox(ctx, model ? model : fz_device_gray(ctx), &bbox);
 	fz_clear_pixmap(ctx, glyph);
 
 	fz_concat(&ctm, &font->t3matrix, trm);

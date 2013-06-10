@@ -81,6 +81,16 @@ void fz_choice_widget_set_value(fz_interactive *idoc, fz_widget *tw, int n, char
 	pdf_choice_widget_set_value((pdf_document *)idoc, tw, n, opts);
 }
 
+int fz_signature_widget_byte_range(fz_interactive *idoc, fz_widget *widget, int (*byte_range)[2])
+{
+	return pdf_signature_widget_byte_range((pdf_document *)idoc, widget, byte_range);
+}
+
+int fz_signature_widget_contents(fz_interactive *idoc, fz_widget *widget, char **contents)
+{
+	return pdf_signature_widget_contents((pdf_document *)idoc, widget, contents);
+}
+
 fz_annot_type fz_get_annot_type(fz_annot *annot)
 {
 	return pdf_annot_type((pdf_annot *)annot);
@@ -109,6 +119,11 @@ void fz_set_markup_annot_quadpoints(fz_interactive *idoc, fz_annot *annot, fz_po
 void fz_set_markup_appearance(fz_interactive *idoc, fz_annot *annot, float color[3], float alpha, float line_thickness, float line_height)
 {
 	pdf_set_markup_appearance((pdf_document *)idoc, (pdf_annot *)annot, color, alpha, line_thickness, line_height);
+}
+
+void fz_set_ink_annot_list(fz_interactive *idoc, fz_annot *annot, fz_point *pts, int *counts, int ncount, float color[3], float thickness)
+{
+	pdf_set_ink_annot_list((pdf_document *)idoc, (pdf_annot *)annot, pts, counts, ncount, color, thickness);
 }
 
 void fz_set_doc_event_callback(fz_interactive *idoc, fz_doc_event_cb *event_cb, void *data)

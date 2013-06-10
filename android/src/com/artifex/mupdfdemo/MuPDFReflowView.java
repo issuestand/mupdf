@@ -99,7 +99,21 @@ public class MuPDFReflowView extends WebView implements MuPDFView {
 		return false;
 	}
 
-	public void markupSelection(Annotation.Type type) {
+	public boolean markupSelection(Annotation.Type type) {
+		return false;
+	}
+
+	public void startDraw(float x, float y) {
+	}
+
+	public void continueDraw(float x, float y) {
+	}
+
+	public void cancelDraw() {
+	}
+
+	public boolean saveDraw() {
+		return false;
 	}
 
 	public void setSearchBoxes(RectF[] searchBoxes) {

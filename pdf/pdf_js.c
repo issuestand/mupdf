@@ -124,7 +124,7 @@ static pdf_jsimp_obj *app_launchURL(void *jsctx, void *obj, int argc, pdf_jsimp_
 	char *cUrl;
 	int bNewFrame = 0;
 
-	switch(argc)
+	switch (argc)
 	{
 	default:
 		return NULL;
@@ -778,7 +778,7 @@ pdf_js *pdf_new_js(pdf_document *doc)
 		js->doc = doc;
 
 		/* Find the form array */
-		root = pdf_dict_gets(doc->trailer, "Root");
+		root = pdf_dict_gets(pdf_trailer(doc), "Root");
 		acroform = pdf_dict_gets(root, "AcroForm");
 		js->form = pdf_dict_gets(acroform, "Fields");
 
@@ -912,7 +912,7 @@ void pdf_js_execute_count(pdf_js *js, char *code, int count)
 	}
 }
 
-int pdf_js_supported()
+int pdf_js_supported(void)
 {
 	return 1;
 }

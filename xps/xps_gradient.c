@@ -60,7 +60,7 @@ xps_parse_gradient_stops(xps_document *doc, char *base_uri, fz_xml *node,
 
 				xps_parse_color(doc, base_uri, color, &colorspace, sample);
 
-				fz_convert_color(doc->ctx, fz_device_rgb, rgb, colorspace, sample + 1);
+				fz_convert_color(doc->ctx, fz_device_rgb(doc->ctx), rgb, colorspace, sample + 1);
 
 				stops[count].r = rgb[0];
 				stops[count].g = rgb[1];
@@ -213,7 +213,7 @@ xps_draw_one_radial_gradient(xps_document *doc, const fz_matrix *ctm,
 	/* TODO: this (and the stuff in pdf_shade) should move to res_shade.c */
 	shade = fz_malloc_struct(doc->ctx, fz_shade);
 	FZ_INIT_STORABLE(shade, 1, fz_free_shade_imp);
-	shade->colorspace = fz_device_rgb;
+	shade->colorspace = fz_device_rgb(doc->ctx);
 	shade->bbox = fz_infinite_rect;
 	shade->matrix = fz_identity;
 	shade->use_background = 0;
@@ -251,7 +251,7 @@ xps_draw_one_linear_gradient(xps_document *doc, const fz_matrix *ctm,
 	/* TODO: this (and the stuff in pdf_shade) should move to res_shade.c */
 	shade = fz_malloc_struct(doc->ctx, fz_shade);
 	FZ_INIT_STORABLE(shade, 1, fz_free_shade_imp);
-	shade->colorspace = fz_device_rgb;
+	shade->colorspace = fz_device_rgb(doc->ctx);
 	shade->bbox = fz_infinite_rect;
 	shade->matrix = fz_identity;
 	shade->use_background = 0;
@@ -444,9 +444,7 @@ xps_parse_gradient_brush(xps_document *doc, const fz_matrix *ctm, const fz_rect 
 	fz_xml *node;
 
 	char *opacity_att;
-	char *interpolation_att;
 	char *spread_att;
-	char *mapping_att;
 	char *transform_att;
 
 	fz_xml *transform_tag = NULL;
@@ -458,9 +456,7 @@ xps_parse_gradient_brush(xps_document *doc, const fz_matrix *ctm, const fz_rect 
 	int spread_method;
 
 	opacity_att = fz_xml_att(root, "Opacity");
-	interpolation_att = fz_xml_att(root, "ColorInterpolationMode");
 	spread_att = fz_xml_att(root, "SpreadMethod");
-	mapping_att = fz_xml_att(root, "MappingMode");
 	transform_att = fz_xml_att(root, "Transform");
 
 	for (node = fz_xml_down(root); node; node = fz_xml_next(node))

@@ -545,31 +545,51 @@ static inline void big32(unsigned char *buf, unsigned int v)
 	buf[3] = (v) & 0xff;
 }
 
-static inline void put32(unsigned int v, FILE *fp)
-{
-	putc(v >> 24, fp);
-	putc(v >> 16, fp);
-	putc(v >> 8, fp);
-	putc(v, fp);
-}
-
-static void putchunk(char *tag, unsigned char *data, int size, FILE *fp)
+static void putchunk(char *tag, unsigned char *data, int size, fz_output *out)
 {
 	unsigned int sum;
-	put32(size, fp);
-	fwrite(tag, 1, 4, fp);
-	fwrite(data, 1, size, fp);
+	fz_write_int32be(out, size);
+	fz_write(out, tag, 4);
+	fz_write(out, data, size);
 	sum = crc32(0, NULL, 0);
 	sum = crc32(sum, (unsigned char*)tag, 4);
 	sum = crc32(sum, data, size);
-	put32(sum, fp);
+	fz_write_int32be(out, sum);
 }
 
 void
 fz_write_png(fz_context *ctx, fz_pixmap *pixmap, char *filename, int savealpha)
 {
+	FILE *fp = fopen(filename, "wb");
+	fz_output *out = NULL;
+
+	if (!fp)
+	{
+		fz_throw(ctx, "cannot open file '%s': %s", filename, strerror(errno));
+	}
+
+	fz_var(out);
+
+	fz_try(ctx)
+	{
+		out = fz_new_output_with_file(ctx, fp);
+		fz_output_png(out, pixmap, savealpha);
+	}
+	fz_always(ctx)
+	{
+		fz_close_output(out);
+		fclose(fp);
+	}
+	fz_catch(ctx)
+	{
+		fz_rethrow(ctx);
+	}
+}
+
+void
+fz_output_png(fz_output *out, const fz_pixmap *pixmap, int savealpha)
+{
 	static const unsigned char pngsig[8] = { 137, 80, 78, 71, 13, 10, 26, 10 };
-	FILE *fp;
 	unsigned char head[13];
 	unsigned char *udata = NULL;
 	unsigned char *cdata = NULL;
@@ -578,6 +598,12 @@ fz_write_png(fz_context *ctx, fz_pixmap *pixmap, char *filename, int savealpha)
 	int y, x, k, sn, dn;
 	int color;
 	int err;
+	fz_context *ctx;
+
+	if (!out || !pixmap)
+		return;
+
+	ctx = out->ctx;
 
 	fz_var(udata);
 	fz_var(cdata);
@@ -639,14 +665,6 @@ fz_write_png(fz_context *ctx, fz_pixmap *pixmap, char *filename, int savealpha)
 		fz_throw(ctx, "cannot compress image data");
 	}
 
-	fp = fopen(filename, "wb");
-	if (!fp)
-	{
-		fz_free(ctx, udata);
-		fz_free(ctx, cdata);
-		fz_throw(ctx, "cannot open file '%s': %s", filename, strerror(errno));
-	}
-
 	big32(head+0, pixmap->w);
 	big32(head+4, pixmap->h);
 	head[8] = 8; /* depth */
@@ -655,14 +673,49 @@ fz_write_png(fz_context *ctx, fz_pixmap *pixmap, char *filename, int savealpha)
 	head[11] = 0; /* filter */
 	head[12] = 0; /* interlace */
 
-	fwrite(pngsig, 1, 8, fp);
-	putchunk("IHDR", head, 13, fp);
-	putchunk("IDAT", cdata, csize, fp);
-	putchunk("IEND", head, 0, fp);
-	fclose(fp);
+	fz_write(out, pngsig, 8);
+	putchunk("IHDR", head, 13, out);
+	putchunk("IDAT", cdata, csize, out);
+	putchunk("IEND", head, 0, out);
 
 	fz_free(ctx, udata);
 	fz_free(ctx, cdata);
+}
+
+fz_buffer *
+fz_image_as_png(fz_context *ctx, fz_image *image, int w, int h)
+{
+	fz_pixmap *pix = fz_image_get_pixmap(ctx, image, image->w, image->h);
+	fz_buffer *buf = NULL;
+	fz_output *out;
+
+	fz_var(buf);
+	fz_var(out);
+
+	fz_try(ctx)
+	{
+		if (pix->colorspace != fz_device_gray(ctx) || pix->colorspace != fz_device_rgb(ctx))
+		{
+			fz_pixmap *pix2 = fz_new_pixmap(ctx, fz_device_rgb(ctx), pix->w, pix->h);
+			fz_convert_pixmap(ctx, pix2, pix);
+			fz_drop_pixmap(ctx, pix);
+			pix = pix2;
+		}
+		buf = fz_new_buffer(ctx, 1024);
+		out = fz_new_output_with_buffer(ctx, buf);
+		fz_output_png(out, pix, 0);
+	}
+	fz_always(ctx)
+	{
+		fz_close_output(out);
+		fz_drop_pixmap(ctx, pix);
+	}
+	fz_catch(ctx)
+	{
+		fz_drop_buffer(ctx, buf);
+		fz_rethrow(ctx);
+	}
+	return buf;
 }
 
 unsigned int
@@ -671,26 +724,6 @@ fz_pixmap_size(fz_context *ctx, fz_pixmap * pix)
 	if (pix == NULL)
 		return 0;
 	return sizeof(*pix) + pix->n * pix->w * pix->h;
-}
-
-fz_pixmap *
-fz_image_to_pixmap(fz_context *ctx, fz_image *image, int w, int h)
-{
-	if (image == NULL)
-		return NULL;
-	return image->get_pixmap(ctx, image, w, h);
-}
-
-fz_image *
-fz_keep_image(fz_context *ctx, fz_image *image)
-{
-	return (fz_image *)fz_keep_storable(ctx, &image->storable);
-}
-
-void
-fz_drop_image(fz_context *ctx, fz_image *image)
-{
-	fz_drop_storable(ctx, &image->storable);
 }
 
 #ifdef ARCH_ARM
@@ -1008,4 +1041,11 @@ fz_subsample_pixmap(fz_context *ctx, fz_pixmap *tile, int factor)
 	tile->w = dst_w;
 	tile->h = dst_h;
 	tile->samples = fz_resize_array(ctx, tile->samples, dst_w * n, dst_h);
+}
+
+void
+fz_pixmap_set_resolution(fz_pixmap *pix, int res)
+{
+	pix->xres = res;
+	pix->yres = res;
 }

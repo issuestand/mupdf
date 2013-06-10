@@ -59,8 +59,6 @@ class PassClickResultChoice extends PassClickResult {
 }
 
 public class MuPDFPageView extends PageView implements MuPDFView {
-	private static final float LINE_THICKNESS = 0.07f;
-	private static final float STRIKE_HEIGHT = 0.375f;
 	private final MuPDFCore mCore;
 	private AsyncTask<Void,Void,PassClickResult> mPassClick;
 	private RectF mWidgetAreas[];
@@ -75,6 +73,7 @@ public class MuPDFPageView extends PageView implements MuPDFView {
 	private AsyncTask<String,Void,Boolean> mSetWidgetText;
 	private AsyncTask<String,Void,Void> mSetWidgetChoice;
 	private AsyncTask<PointF[],Void,Void> mAddStrikeOut;
+	private AsyncTask<PointF[][],Void,Void> mAddInk;
 	private AsyncTask<Integer,Void,Void> mDeleteAnnotation;
 	private Runnable changeReporter;
 
@@ -82,16 +81,16 @@ public class MuPDFPageView extends PageView implements MuPDFView {
 		super(c, parentSize);
 		mCore = core;
 		mTextEntryBuilder = new AlertDialog.Builder(c);
-		mTextEntryBuilder.setTitle("MuPDF: fill out text field");
+		mTextEntryBuilder.setTitle(getContext().getString(R.string.fill_out_text_field));
 		LayoutInflater inflater = (LayoutInflater)c.getSystemService(Context.LAYOUT_INFLATER_SERVICE);
 		mEditText = (EditText)inflater.inflate(R.layout.textentry, null);
 		mTextEntryBuilder.setView(mEditText);
-		mTextEntryBuilder.setNegativeButton("Cancel", new DialogInterface.OnClickListener() {
+		mTextEntryBuilder.setNegativeButton(R.string.cancel, new DialogInterface.OnClickListener() {
 			public void onClick(DialogInterface dialog, int which) {
 				dialog.dismiss();
 			}
 		});
-		mTextEntryBuilder.setPositiveButton("Okay", new DialogInterface.OnClickListener() {
+		mTextEntryBuilder.setPositiveButton(R.string.okay, new DialogInterface.OnClickListener() {
 			public void onClick(DialogInterface dialog, int which) {
 				mSetWidgetText = new AsyncTask<String,Void,Boolean> () {
 					@Override
@@ -112,7 +111,7 @@ public class MuPDFPageView extends PageView implements MuPDFView {
 		mTextEntry = mTextEntryBuilder.create();
 
 		mChoiceEntryBuilder = new AlertDialog.Builder(c);
-		mChoiceEntryBuilder.setTitle("MuPDF: choose value");
+		mChoiceEntryBuilder.setTitle(getContext().getString(R.string.choose_value));
 	}
 
 	public LinkInfo hitLink(float x, float y) {
@@ -185,6 +184,7 @@ public class MuPDFPageView extends PageView implements MuPDFView {
 				case UNDERLINE:
 				case SQUIGGLY:
 				case STRIKEOUT:
+				case INK:
 					mSelectedAnnotationIndex = i;
 					setItemSelectBox(mAnnotations[i]);
 					return Hit.Annotation;
@@ -279,7 +279,7 @@ public class MuPDFPageView extends PageView implements MuPDFView {
 		return true;
 	}
 
-	public void markupSelection(final Annotation.Type type) {
+	public boolean markupSelection(final Annotation.Type type) {
 		final ArrayList<PointF> quadPoints = new ArrayList<PointF>();
 		processSelectedText(new TextProcessor() {
 			RectF rect;
@@ -302,6 +302,9 @@ public class MuPDFPageView extends PageView implements MuPDFView {
 			}
 		});
 
+		if (quadPoints.size() == 0)
+			return false;
+
 		mAddStrikeOut = new AsyncTask<PointF[],Void,Void>() {
 			@Override
 			protected Void doInBackground(PointF[]... params) {
@@ -319,6 +322,8 @@ public class MuPDFPageView extends PageView implements MuPDFView {
 		mAddStrikeOut.execute(quadPoints.toArray(new PointF[quadPoints.size()]));
 
 		deselectText();
+
+		return true;
 	}
 
 	public void deleteSelectedAnnotation() {
@@ -350,6 +355,37 @@ public class MuPDFPageView extends PageView implements MuPDFView {
 	public void deselectAnnotation() {
 		mSelectedAnnotationIndex = -1;
 		setItemSelectBox(null);
+	}
+
+	public boolean saveDraw() {
+		PointF[][] path = getDraw();
+
+		if (path == null)
+			return false;
+
+		if (mAddInk != null) {
+			mAddInk.cancel(true);
+			mAddInk = null;
+		}
+		mAddInk = new AsyncTask<PointF[][],Void,Void>() {
+			@Override
+			protected Void doInBackground(PointF[][]... params) {
+				mCore.addInkAnnotation(mPageNumber, params[0]);
+				return null;
+			}
+
+			@Override
+			protected void onPostExecute(Void result) {
+				loadAnnotations();
+				update();
+			}
+
+		};
+
+		mAddInk.execute(getDraw());
+		cancelDraw();
+
+		return true;
 	}
 
 	@Override

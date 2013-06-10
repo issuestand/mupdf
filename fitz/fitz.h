@@ -209,6 +209,7 @@ typedef struct fz_error_context_s fz_error_context;
 typedef struct fz_id_context_s fz_id_context;
 typedef struct fz_warn_context_s fz_warn_context;
 typedef struct fz_font_context_s fz_font_context;
+typedef struct fz_colorspace_context_s fz_colorspace_context;
 typedef struct fz_aa_context_s fz_aa_context;
 typedef struct fz_locks_context_s fz_locks_context;
 typedef struct fz_store_s fz_store;
@@ -304,6 +305,7 @@ struct fz_context_s
 	fz_error_context *error;
 	fz_warn_context *warn;
 	fz_font_context *font;
+	fz_colorspace_context *colorspace;
 	fz_aa_context *aa;
 	fz_store *store;
 	fz_glyph_cache *glyph_cache;
@@ -1227,6 +1229,11 @@ fz_point *fz_transform_vector(fz_point *restrict vector, const fz_matrix *restri
 fz_rect *fz_transform_rect(fz_rect *restrict rect, const fz_matrix *restrict transform);
 
 /*
+	fz_normalize_vector: Normalize a vector to length one.
+*/
+void fz_normalize_vector(fz_point *p);
+
+/*
 	fz_buffer is a wrapper around a dynamically allocated array of bytes.
 
 	Buffers have a capacity (the number of bytes storage immediately
@@ -1416,34 +1423,56 @@ void fz_drop_bitmap(fz_context *ctx, fz_bitmap *bit);
 typedef struct fz_colorspace_s fz_colorspace;
 
 /*
-	fz_find_device_colorspace: Find a standard colorspace based upon
+	fz_lookup_device_colorspace: Find a standard colorspace based upon
 	it's name.
 */
-fz_colorspace *fz_find_device_colorspace(fz_context *ctx, char *name);
+fz_colorspace *fz_lookup_device_colorspace(fz_context *ctx, char *name);
 
 /*
-	fz_device_gray: Abstract colorspace representing device specific
-	gray.
+	fz_colorspace_is_indexed: Return true, iff a given colorspace is
+	indexed.
 */
-extern fz_colorspace *fz_device_gray;
+int fz_colorspace_is_indexed(fz_colorspace *cs);
 
 /*
-	fz_device_rgb: Abstract colorspace representing device specific
-	rgb.
+	fz_device_gray: Get colorspace representing device specific gray.
 */
-extern fz_colorspace *fz_device_rgb;
+fz_colorspace *fz_device_gray(fz_context *ctx);
 
 /*
-	fz_device_bgr: Abstract colorspace representing device specific
-	bgr.
+	fz_device_rgb: Get colorspace representing device specific rgb.
 */
-extern fz_colorspace *fz_device_bgr;
+fz_colorspace *fz_device_rgb(fz_context *ctx);
 
 /*
-	fz_device_cmyk: Abstract colorspace representing device specific
-	CMYK.
+	fz_device_bgr: Get colorspace representing device specific bgr.
 */
-extern fz_colorspace *fz_device_cmyk;
+fz_colorspace *fz_device_bgr(fz_context *ctx);
+
+/*
+	fz_device_cmyk: Get colorspace representing device specific CMYK.
+*/
+fz_colorspace *fz_device_cmyk(fz_context *ctx);
+
+/*
+	fz_set_device_gray: Set colorspace representing device specific gray.
+*/
+void fz_set_device_gray(fz_context *ctx, fz_colorspace *cs);
+
+/*
+	fz_set_device_rgb: Set colorspace representing device specific rgb.
+*/
+void fz_set_device_rgb(fz_context *ctx, fz_colorspace *cs);
+
+/*
+	fz_set_device_bgr: Set colorspace representing device specific bgr.
+*/
+void fz_set_device_bgr(fz_context *ctx, fz_colorspace *cs);
+
+/*
+	fz_set_device_cmyk: Set colorspace representing device specific CMYK.
+*/
+void fz_set_device_cmyk(fz_context *ctx, fz_colorspace *cs);
 
 /*
 	Pixmaps represent a set of pixels for a 2 dimensional region of a
@@ -1581,6 +1610,8 @@ int fz_pixmap_components(fz_context *ctx, fz_pixmap *pix);
 */
 unsigned char *fz_pixmap_samples(fz_context *ctx, fz_pixmap *pix);
 
+void fz_pixmap_set_resolution(fz_pixmap *pix, int res);
+
 /*
 	fz_clear_pixmap_with_value: Clears a pixmap with the given value.
 
@@ -1696,6 +1727,74 @@ void fz_write_pam(fz_context *ctx, fz_pixmap *pixmap, char *filename, int saveal
 */
 void fz_write_png(fz_context *ctx, fz_pixmap *pixmap, char *filename, int savealpha);
 
+typedef struct fz_pwg_options_s fz_pwg_options;
+
+struct fz_pwg_options_s
+{
+	/* These are not interpreted as CStrings by the writing code, but
+	 * are rather copied directly out. */
+	char media_class[64];
+	char media_color[64];
+	char media_type[64];
+	char output_type[64];
+
+	unsigned int advance_distance;
+	int advance_media;
+	int collate;
+	int cut_media;
+	int duplex;
+	int insert_sheet;
+	int jog;
+	int leading_edge;
+	int manual_feed;
+	unsigned int media_position;
+	unsigned int media_weight;
+	int mirror_print;
+	int negative_print;
+	unsigned int num_copies;
+	int orientation;
+	int output_face_up;
+	unsigned int PageSize[2];
+	int separations;
+	int tray_switch;
+	int tumble;
+
+	int media_type_num;
+	int compression;
+	unsigned int row_count;
+	unsigned int row_feed;
+	unsigned int row_step;
+
+	/* These are not interpreted as CStrings by the writing code, but
+	 * are rather copied directly out. */
+	char rendering_intent[64];
+	char page_size_name[64];
+};
+
+/*
+	fz_write_pwg: Save a pixmap as a pwg
+
+	filename: The filename to save as (including extension).
+
+	append: If non-zero, then append a new page to existing file.
+
+	pwg: NULL, or a pointer to an options structure (initialised to zero
+	before being filled in, for future expansion).
+*/
+void fz_write_pwg(fz_context *ctx, fz_pixmap *pixmap, char *filename, int append, const fz_pwg_options *pwg);
+
+/*
+	fz_write_pwg_bitmap: Save a bitmap as a pwg
+
+	filename: The filename to save as (including extension).
+
+	append: If non-zero, then append a new page to existing file.
+
+	pwg: NULL, or a pointer to an options structure (initialised to zero
+	before being filled in, for future expansion).
+*/
+void fz_write_pwg_bitmap(fz_context *ctx, fz_bitmap *bitmap, char *filename, int append, const fz_pwg_options *pwg);
+
 /*
 	fz_write_pbm: Save a bitmap as a pbm
 
@@ -1780,6 +1879,89 @@ fz_bitmap *fz_halftone_pixmap(fz_context *ctx, fz_pixmap *pix, fz_halftone *ht);
 typedef struct fz_font_s fz_font;
 
 /*
+	Generic output streams - generalise between outputting to a file,
+	a buffer, etc.
+*/
+typedef struct fz_output_s fz_output;
+
+struct fz_output_s
+{
+	fz_context *ctx;
+	void *opaque;
+	int (*printf)(fz_output *, const char *, va_list ap);
+	int (*write)(fz_output *, const void *, int n);
+	void (*close)(fz_output *);
+};
+
+/*
+	fz_new_output_with_file: Open an output stream onto a FILE *.
+
+	The stream does NOT take ownership of the FILE *.
+*/
+fz_output *fz_new_output_with_file(fz_context *, FILE *);
+
+/*
+	fz_new_output_with_buffer: Open an output stream onto a buffer.
+
+	The stream does NOT take ownership of the buffer.
+*/
+fz_output *fz_new_output_with_buffer(fz_context *, fz_buffer *);
+
+/*
+	fz_printf: fprintf equivalent for output streams.
+*/
+int fz_printf(fz_output *, const char *, ...);
+
+/*
+	fz_puts: fputs equivalent for output streams.
+*/
+int fz_puts(fz_output *, const char *);
+
+/*
+	fz_write: fwrite equivalent for output streams.
+*/
+int fz_write(fz_output *out, const void *data, int len);
+
+/*
+	Output a pixmap to an output stream as a png.
+*/
+void fz_output_png(fz_output *out, const fz_pixmap *pixmap, int savealpha);
+
+/*
+	Output a pixmap to an output stream as a pwg raster.
+*/
+void fz_output_pwg(fz_output *out, const fz_pixmap *pixmap, const fz_pwg_options *pwg);
+
+/*
+	Output the file header to a pwg stream, ready for pages to follow it.
+*/
+void fz_output_pwg_file_header(fz_output *out);
+
+/*
+	Output a page to a pwg stream to follow a header, or other pages.
+*/
+void fz_output_pwg_page(fz_output *out, const fz_pixmap *pixmap, const fz_pwg_options *pwg);
+
+/*
+	Output a bitmap page to a pwg stream to follow a header, or other pages.
+*/
+void fz_output_pwg_bitmap_page(fz_output *out, const fz_bitmap *bitmap, const fz_pwg_options *pwg);
+
+/*
+	Get an image as a png in a buffer.
+*/
+fz_buffer *fz_image_as_png(fz_context *ctx, fz_image *image, int w, int h);
+
+/*
+	fz_close_output: Close a previously opened fz_output stream.
+
+	Note: whether or not this closes the underlying output method is
+	method dependent. FILE * streams created by fz_new_output_with_file
+	are NOT closed.
+*/
+void fz_close_output(fz_output *);
+
+/*
 	The different format handlers (pdf, xps etc) interpret pages to a
 	device. These devices can then process the stream of calls they
 	recieve in various ways:
@@ -1837,6 +2019,39 @@ fz_device *fz_new_draw_device(fz_context *ctx, fz_pixmap *dest);
 */
 fz_device *fz_new_draw_device_with_bbox(fz_context *ctx, fz_pixmap *dest, const fz_irect *clip);
 
+fz_device *fz_new_svg_device(fz_context *ctx, fz_output *out, float page_width, float page_height);
+
+/*
+	fz_enable_device_hints : Enable hints in a device.
+
+	hints: mask of hints to enable.
+
+	For example: By default the draw device renders shadings. For some
+	purposes (perhaps rendering fast low quality thumbnails) you may want
+	to tell it to ignore shadings. For this you would enable the
+	FZ_IGNORE_SHADE hint.
+*/
+void fz_enable_device_hints(fz_device *dev, int hints);
+
+/*
+	fz_disable_device_hints : Disable hints in a device.
+
+	hints: mask of hints to disable.
+
+	For example: By default the text extraction device ignores images.
+	For some purposes however (such as extracting HTML) you may want to
+	enable the capturing of image data too. For this you would disable
+	the FZ_IGNORE_IMAGE hint.
+*/
+void fz_disable_device_hints(fz_device *dev, int hints);
+
+enum
+{
+	/* Hints */
+	FZ_IGNORE_IMAGE = 1,
+	FZ_IGNORE_SHADE = 2,
+};
+
 /*
 	Text extraction device: Used for searching, format conversion etc.
 
@@ -1848,6 +2063,8 @@ typedef struct fz_text_char_s fz_text_char;
 typedef struct fz_text_span_s fz_text_span;
 typedef struct fz_text_line_s fz_text_line;
 typedef struct fz_text_block_s fz_text_block;
+typedef struct fz_image_block_s fz_image_block;
+typedef struct fz_page_block_s fz_page_block;
 
 typedef struct fz_text_sheet_s fz_text_sheet;
 typedef struct fz_text_page_s fz_text_page;
@@ -1874,18 +2091,39 @@ struct fz_text_style_s
 	float size;
 	int wmode;
 	int script;
+	float ascender;
+	float descender;
 	/* etc... */
 };
 
 /*
-	fz_text_page: A text page is a list of blocks of text, together with
+	fz_text_page: A text page is a list of page blocks, together with
 	an overall bounding box.
 */
 struct fz_text_page_s
 {
 	fz_rect mediabox;
 	int len, cap;
-	fz_text_block *blocks;
+	fz_page_block *blocks;
+};
+
+/*
+	fz_page_block: A page block is a typed block pointer.
+*/
+struct fz_page_block_s
+{
+	int type;
+	union
+	{
+		fz_text_block *text;
+		fz_image_block *image;
+	} u;
+};
+
+enum
+{
+	FZ_PAGE_BLOCK_TEXT = 0,
+	FZ_PAGE_BLOCK_IMAGE = 1
 };
 
 /*
@@ -1900,44 +2138,104 @@ struct fz_text_block_s
 	fz_text_line *lines;
 };
 
+enum { FZ_MAX_COLORS = 32 };
+
+/*
+	fz_image_block: An image block is an image, together with the  list of lines of text. In typical
+	cases this may correspond to a paragraph or a column of text. A
+	collection of blocks makes up a page.
+*/
+struct fz_image_block_s
+{
+	fz_rect bbox;
+	fz_matrix mat;
+	fz_image *image;
+	fz_colorspace *cspace;
+	float colors[FZ_MAX_COLORS];
+};
+
 /*
 	fz_text_line: A text line is a list of text spans, with the same
-	(or very similar) baseline. In typical cases this should correspond
-	(as expected) to complete lines of text. A collection of lines makes
-	up a block.
+	baseline. In typical cases this should correspond (as expected) to
+	complete lines of text. A collection of lines makes up a block.
 */
 struct fz_text_line_s
 {
+	fz_text_span *first_span, *last_span;
+
+	/* Cached information */
+	float distance; /* Perpendicular distance from previous line */
 	fz_rect bbox;
-	int len, cap;
-	fz_text_span *spans;
+	void *region; /* Opaque value for matching line masks */
 };
 
 /*
-	fz_text_span: A text span is a list of characters in the same style
-	that share a common (or very similar) baseline. In typical cases
-	(where only one font style is used in a line), a single span may be
-	enough to represent a complete line. In cases where multiple
-	font styles are used (for example italics), then a line will be
-	broken down into a series of spans.
+	fz_text_span: A text span is a list of characters that share a common
+	baseline/transformation. In typical cases a single span may be enough
+	to represent a complete line. In cases where the text has big gaps in
+	it (perhaps as it crosses columns or tables), a line may be represented
+	by multiple spans.
 */
 struct fz_text_span_s
 {
-	fz_rect bbox;
 	int len, cap;
 	fz_text_char *text;
-	fz_text_style *style;
+	fz_point min; /* Device space */
+	fz_point max; /* Device space */
+	int wmode; /* 0 for horizontal, 1 for vertical */
+	fz_matrix transform; /* e and f are always 0 here */
+	float ascender_max; /* Document space */
+	float descender_min; /* Document space */
+	fz_rect bbox; /* Device space */
+
+	/* Cached information */
+	float base_offset; /* Perpendicular distance from baseline of line */
+	float spacing; /* Distance along baseline from previous span in this line (or 0 if first) */
+	int column; /* If non zero, the column that it's in */
+	float column_width; /* Percentage */
+	int align; /* 0 = left, 1 = centre, 2 = right */
+	float indent; /* The indent position for this column. */
+
+	fz_text_span *next;
 };
 
 /*
-	fz_text_char: A text char is a unicode character and the bounding
-	box with which it appears on the page.
+	fz_text_char: A text char is a unicode character, the style in which
+	is appears, and the point at which it is positioned. Transform
+	(and hence bbox) information is given by the enclosing span.
 */
 struct fz_text_char_s
 {
-	fz_rect bbox;
+	fz_point p; /* Device space */
 	int c;
+	fz_text_style *style;
 };
+
+typedef struct fz_char_and_box_s fz_char_and_box;
+
+struct fz_char_and_box_s
+{
+	int c;
+	fz_rect bbox;
+};
+
+fz_char_and_box *fz_text_char_at(fz_char_and_box *cab, fz_text_page *page, int idx);
+
+/*
+	fz_text_char_bbox: Return the bbox of a text char. Calculated from
+	the supplied enclosing span.
+
+	bbox: A place to store the bbox
+
+	span: The enclosing span
+
+	idx: The index of the char within the span
+
+	Returns bbox (updated)
+
+	Does not throw exceptions
+*/
+fz_rect *fz_text_char_bbox(fz_rect *bbox, fz_text_span *span, int idx);
 
 /*
 	fz_new_text_device: Create a device to extract the text on a page.
@@ -1977,30 +2275,7 @@ void fz_free_text_sheet(fz_context *ctx, fz_text_sheet *sheet);
 fz_text_page *fz_new_text_page(fz_context *ctx, const fz_rect *mediabox);
 void fz_free_text_page(fz_context *ctx, fz_text_page *page);
 
-typedef struct fz_output_s fz_output;
-
-struct fz_output_s
-{
-	fz_context *ctx;
-	void *opaque;
-	int (*printf)(fz_output *, const char *, va_list ap);
-	void (*close)(fz_output *);
-};
-
-fz_output *fz_new_output_file(fz_context *, FILE *);
-
-fz_output *fz_new_output_buffer(fz_context *, fz_buffer *);
-
-int fz_printf(fz_output *, const char *, ...);
-
-/*
-	fz_close_output: Close a previously opened fz_output stream.
-
-	Note: whether or not this closes the underlying output method is
-	method dependent. FILE * streams created by fz_new_output_file are
-	NOT closed.
-*/
-void fz_close_output(fz_output *);
+void fz_analyze_text(fz_context *ctx, fz_text_sheet *sheet, fz_text_page *page);
 
 /*
 	fz_print_text_sheet: Output a text sheet to a file as CSS.
@@ -2029,7 +2304,7 @@ void fz_print_text_page(fz_context *ctx, fz_output *out, fz_text_page *page);
 
 	NOTE: This is an experimental interface and subject to change without notice.
 */
-int fz_search_text_page(fz_context *ctx, fz_text_page *text, char *needle, fz_rect *hit_bbox, int hit_max);
+int fz_search_text_page(fz_context *ctx, fz_text_page *text, const char *needle, fz_rect *hit_bbox, int hit_max);
 
 /*
 	fz_highlight_selection: Return a list of rectangles to highlight given a selection rectangle.
@@ -2218,7 +2493,7 @@ enum {
 
 		gotor.flags: A bitfield consisting of fz_link_flag_*
 		describing the validity and meaning of the different parts
-		of gotor.lr and gotor.rb. Link destinations are constructed
+		of gotor.lt and gotor.rb. Link destinations are constructed
 		(as far as possible) so that lt and rb can be treated as a
 		bounding box, though the validity flags indicate which of the
 		values was actually specified in the file.
@@ -2769,7 +3044,8 @@ enum
 	FZ_WIDGET_TYPE_RADIOBUTTON,
 	FZ_WIDGET_TYPE_TEXT,
 	FZ_WIDGET_TYPE_LISTBOX,
-	FZ_WIDGET_TYPE_COMBOBOX
+	FZ_WIDGET_TYPE_COMBOBOX,
+	FZ_WIDGET_TYPE_SIGNATURE
 };
 
 /* Types of text widget content */
@@ -2964,6 +3240,21 @@ int fz_choice_widget_value(fz_interactive *idoc, fz_widget *tw, char *opts[]);
 void fz_choice_widget_set_value(fz_interactive *idoc, fz_widget *tw, int n, char *opts[]);
 
 /*
+	fz_signature_widget_byte_range: retrieve the byte range for a signature widget
+*/
+int fz_signature_widget_byte_range(fz_interactive *idoc, fz_widget *widget, int (*byte_range)[2]);
+
+/*
+	fz_signature_widget_contents: retrieve the contents for a signature widget
+*/
+int fz_signature_widget_contents(fz_interactive *idoc, fz_widget *widget, char **contents);
+
+/*
+	fz_check_signature: check a signature's certificate chain and digest
+*/
+int fz_check_signature(fz_context *ctx, fz_interactive *idoc, fz_widget *widget, char *file, char *ebuf, int ebufsize);
+
+/*
 	Document events: the objects via which MuPDF informs the calling app
 	of occurrences emanating from the document, possibly from user interaction
 	or javascript execution. MuPDF informs the app of document events via a
@@ -3132,7 +3423,7 @@ fz_mail_doc_event *fz_access_mail_doc_event(fz_doc_event *event);
 	fz_javascript_supported: test whether a version of mupdf with
 	a javascript engine is in use.
 */
-int fz_javascript_supported();
+int fz_javascript_supported(void);
 
 typedef struct fz_write_options_s fz_write_options;
 
@@ -3183,5 +3474,95 @@ enum
 	May throw exceptions.
 */
 void fz_write_document(fz_document *doc, char *filename, fz_write_options *opts);
+
+/*
+	PCL output
+*/
+typedef struct fz_pcl_options_s fz_pcl_options;
+
+struct fz_pcl_options_s
+{
+	/* Features of a particular printer */
+	int features;
+	const char *odd_page_init;
+	const char *even_page_init;
+
+	/* Options for this job */
+	int tumble;
+	int duplex_set;
+	int duplex;
+	int paper_size;
+	int manual_feed_set;
+	int manual_feed;
+	int media_position_set;
+	int media_position;
+
+	/* Updated as we move through the job */
+	int page_count;
+};
+
+/*
+	 fz_pcl_preset: Retrieve a set of fz_pcl_options suitable for a given
+	 preset.
+
+	 opts: pointer to options structure to populate.
+
+	 preset: Preset to fetch. Currently defined presets include:
+	 	ljet4	HP DeskJet
+	 	dj500	HP DeskJet 500
+	 	fs600	Kyocera FS-600
+	 	lj	HP LaserJet, HP LaserJet Plus
+	 	lj2	HP LaserJet IIp, HP LaserJet IId
+	 	lj3	HP LaserJet III
+	 	lj3d	HP LaserJet IIId
+	 	lj4	HP LaserJet 4
+	 	lj4pl	HP LaserJet 4 PL
+	 	lj4d	HP LaserJet 4d
+	 	lp2563b	HP 2563B line printer
+	 	oce9050	Oce 9050 Line printer
+
+	Throws exception on unknown preset.
+*/ 
+void fz_pcl_preset(fz_context *ctx, fz_pcl_options *opts, const char *preset);
+
+/*
+	fz_pcl_option: Set a given PCL option to a given value in the supplied
+	options structure.
+
+	opts: The option structure to modify,
+
+	option: The option to change.
+
+	val: The value that the option should be set to. Acceptable ranges of
+	values depend on the option in question.
+
+	Throws an exception on attempt to set an unknown option, or an illegal
+	value.
+
+	Currently defined options/values are as follows:
+
+		spacing,0		No vertical spacing capability
+		spacing,1		PCL 3 spacing (<ESC>*p+<n>Y)
+		spacing,2		PCL 4 spacing (<ESC>*b<n>Y)
+		spacing,3		PCL 5 spacing (<ESC>*b<n>Y and clear seed row)
+		mode2,0 or 1		Disable/Enable mode 2 graphics compression
+		mode3,0 or 1		Disable/Enable mode 3 graphics compression
+		mode3,0 or 1		Disable/Enable mode 3 graphics compression
+		eog_reset,0 or 1	End of graphics (<ESC>*rB) resets all parameters
+		has_duplex,0 or 1	Duplex supported (<ESC>&l<duplex>S)
+		has_papersize,0 or 1	Papersize setting supported (<ESC>&l<sizecode>A)
+		has_copies,0 or 1	Number of copies supported (<ESC>&l<copies>X)
+		is_ljet4pjl,0 or 1	Disable/Enable HP 4PJL model-specific output
+		is_oce9050,0 or 1	Disable/Enable Oce 9050 model-specific output
+*/ 
+void fz_pcl_option(fz_context *ctx, fz_pcl_options *opts, const char *option, int val);
+
+void fz_output_pcl(fz_output *out, const fz_pixmap *pixmap, fz_pcl_options *pcl);
+
+void fz_output_pcl_bitmap(fz_output *out, const fz_bitmap *bitmap, fz_pcl_options *pcl);
+
+void fz_write_pcl(fz_context *ctx, fz_pixmap *pixmap, char *filename, int append, fz_pcl_options *pcl);
+
+void fz_write_pcl_bitmap(fz_context *ctx, fz_bitmap *bitmap, char *filename, int append, fz_pcl_options *pcl);
 
 #endif

@@ -4,10 +4,6 @@ include $(CLEAR_VARS)
 
 MY_ROOT := ../..
 
-OPENJPEG := openjpeg
-JPEG := jpeg
-ZLIB := zlib
-FREETYPE := freetype
 V8 := v8-3.9
 
 ifeq ($(TARGET_ARCH_ABI),x86)
@@ -21,18 +17,22 @@ LOCAL_CFLAGS += -pg -DNDK_PROFILER -O2
 endif
 endif
 LOCAL_CFLAGS += -DAA_BITS=8
+ifdef MEMENTO
+LOCAL_CFLAGS += -DMEMENTO -DMEMENTO_LEAKONLY
+endif
 
 LOCAL_C_INCLUDES := \
 	../thirdparty/jbig2dec \
-	../thirdparty/$(OPENJPEG)/libopenjpeg \
-	../thirdparty/$(JPEG) \
-	../thirdparty/$(ZLIB) \
-	../thirdparty/$(FREETYPE)/include \
+	../thirdparty/openjpeg/src/lib/openjp2 \
+	../thirdparty/jpeg \
+	../thirdparty/zlib \
+	../thirdparty/freetype/include \
 	../draw \
 	../fitz \
 	../pdf \
 	../xps \
 	../cbz \
+	../ucdn \
 	../scripts \
 	..
 ifdef V8_BUILD
@@ -57,13 +57,11 @@ LOCAL_SRC_FILES := \
 	$(MY_ROOT)/fitz/dev_bbox.c \
 	$(MY_ROOT)/fitz/dev_list.c \
 	$(MY_ROOT)/fitz/dev_null.c \
-	$(MY_ROOT)/fitz/dev_text.c \
 	$(MY_ROOT)/fitz/dev_trace.c \
 	$(MY_ROOT)/fitz/doc_document.c \
 	$(MY_ROOT)/fitz/doc_interactive.c \
 	$(MY_ROOT)/fitz/doc_link.c \
 	$(MY_ROOT)/fitz/doc_outline.c \
-	$(MY_ROOT)/fitz/doc_search.c \
 	$(MY_ROOT)/fitz/filt_basic.c \
 	$(MY_ROOT)/fitz/filt_dctd.c \
 	$(MY_ROOT)/fitz/filt_faxd.c \
@@ -77,6 +75,8 @@ LOCAL_SRC_FILES := \
 	$(MY_ROOT)/fitz/image_tiff.c \
 	$(MY_ROOT)/fitz/res_colorspace.c \
 	$(MY_ROOT)/fitz/res_font.c \
+	$(MY_ROOT)/fitz/res_func.c \
+	$(MY_ROOT)/fitz/res_image.c \
 	$(MY_ROOT)/fitz/res_path.c \
 	$(MY_ROOT)/fitz/res_pixmap.c \
 	$(MY_ROOT)/fitz/res_store.c \
@@ -86,6 +86,10 @@ LOCAL_SRC_FILES := \
 	$(MY_ROOT)/fitz/stm_open.c \
 	$(MY_ROOT)/fitz/stm_output.c \
 	$(MY_ROOT)/fitz/stm_read.c \
+	$(MY_ROOT)/fitz/text_extract.c \
+	$(MY_ROOT)/fitz/text_output.c \
+	$(MY_ROOT)/fitz/text_paragraph.c \
+	$(MY_ROOT)/fitz/text_search.c \
 	$(MY_ROOT)/draw/draw_affine.c \
 	$(MY_ROOT)/draw/draw_blend.c \
 	$(MY_ROOT)/draw/draw_device.c \
@@ -96,6 +100,7 @@ LOCAL_SRC_FILES := \
 	$(MY_ROOT)/draw/draw_path.c \
 	$(MY_ROOT)/draw/draw_simple_scale.c \
 	$(MY_ROOT)/draw/draw_unpack.c \
+	$(MY_ROOT)/ucdn/ucdn.c \
 	$(MY_ROOT)/pdf/pdf_annot.c \
 	$(MY_ROOT)/pdf/pdf_cmap.c \
 	$(MY_ROOT)/pdf/pdf_cmap_load.c \
@@ -142,7 +147,11 @@ LOCAL_SRC_FILES := \
 	$(MY_ROOT)/xps/xps_tile.c \
 	$(MY_ROOT)/xps/xps_util.c \
 	$(MY_ROOT)/xps/xps_zip.c \
-	$(MY_ROOT)/cbz/mucbz.c
+	$(MY_ROOT)/cbz/mucbz.c \
+	$(MY_ROOT)/image/muimage.c
+ifdef MEMENTO
+	LOCAL_SRC_FILES += $(MY_ROOT)/fitz/memento.c
+endif
 ifdef V8_BUILD
 LOCAL_SRC_FILES += \
 	$(MY_ROOT)/pdf/pdf_js.c \

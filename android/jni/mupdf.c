@@ -35,6 +35,7 @@
 #define STRIKE_HEIGHT (0.375f)
 #define UNDERLINE_HEIGHT (0.075f)
 #define LINE_THICKNESS (0.07f)
+#define INK_THICKNESS (4.0f)
 #define SMALL_FLOAT (0.00001)
 
 enum
@@ -128,7 +129,7 @@ static void drop_changed_rects(fz_context *ctx, rect_node **nodePtr)
 
 static void drop_page_cache(globals *glo, page_cache *pc)
 {
-	fz_context  *ctx = glo->ctx;
+	fz_context *ctx = glo->ctx;
 	fz_document *doc = glo->doc;
 
 	LOGI("Drop page %d", pc->number);
@@ -248,8 +249,11 @@ static void alerts_fin(globals *glo)
 static globals *get_globals(JNIEnv *env, jobject thiz)
 {
 	globals *glo = (globals *)(void *)((*env)->GetLongField(env, thiz, global_fid));
-	glo->env = env;
-	glo->thiz = thiz;
+	if (glo != NULL)
+	{
+		glo->env = env;
+		glo->thiz = thiz;
+	}
 	return glo;
 }
 
@@ -257,9 +261,9 @@ JNIEXPORT jlong JNICALL
 JNI_FN(MuPDFCore_openFile)(JNIEnv * env, jobject thiz, jstring jfilename)
 {
 	const char *filename;
-	globals    *glo;
+	globals *glo;
 	fz_context *ctx;
-	jclass      clazz;
+	jclass clazz;
 
 #ifdef NDK_PROFILER
 	monstartup("libmupdf.so");
@@ -295,7 +299,7 @@ JNI_FN(MuPDFCore_openFile)(JNIEnv * env, jobject thiz, jstring jfilename)
 	glo->doc = NULL;
 	fz_try(ctx)
 	{
-		glo->colorspace = fz_device_rgb;
+		glo->colorspace = fz_device_rgb(ctx);
 
 		LOGE("Opening document...");
 		fz_try(ctx)
@@ -328,10 +332,10 @@ JNI_FN(MuPDFCore_openFile)(JNIEnv * env, jobject thiz, jstring jfilename)
 
 static int bufferStreamRead(fz_stream *stream, unsigned char *buf, int len)
 {
-	globals    *glo = (globals *)stream->state;
-	JNIEnv     *env = glo->env;
-	jbyteArray  array = (jbyteArray)(void *)((*env)->GetObjectField(env, glo->thiz, buffer_fid));
-	int         arrayLength = (*env)->GetArrayLength(env, array);
+	globals *glo = (globals *)stream->state;
+	JNIEnv *env = glo->env;
+	jbyteArray array = (jbyteArray)(void *)((*env)->GetObjectField(env, glo->thiz, buffer_fid));
+	int arrayLength = (*env)->GetArrayLength(env, array);
 
 	if (stream->pos > arrayLength)
 		stream->pos = arrayLength;
@@ -352,10 +356,10 @@ static void bufferStreamClose(fz_context *ctx, void *state)
 
 static void bufferStreamSeek(fz_stream *stream, int offset, int whence)
 {
-	globals    *glo = (globals *)stream->state;
-	JNIEnv     *env = glo->env;
-	jbyteArray  array = (jbyteArray)(void *)((*env)->GetObjectField(env, glo->thiz, buffer_fid));
-	int         arrayLength = (*env)->GetArrayLength(env, array);
+	globals *glo = (globals *)stream->state;
+	JNIEnv *env = glo->env;
+	jbyteArray array = (jbyteArray)(void *)((*env)->GetObjectField(env, glo->thiz, buffer_fid));
+	int arrayLength = (*env)->GetArrayLength(env, array);
 
 	(*env)->DeleteLocalRef(env, array);
 
@@ -378,9 +382,9 @@ static void bufferStreamSeek(fz_stream *stream, int offset, int whence)
 JNIEXPORT jlong JNICALL
 JNI_FN(MuPDFCore_openBuffer)(JNIEnv * env, jobject thiz)
 {
-	globals    *glo;
+	globals *glo;
 	fz_context *ctx;
-	jclass      clazz;
+	jclass clazz;
 	fz_stream *stream;
 
 #ifdef NDK_PROFILER
@@ -414,7 +418,7 @@ JNI_FN(MuPDFCore_openBuffer)(JNIEnv * env, jobject thiz)
 		stream = fz_new_stream(ctx, glo, bufferStreamRead, bufferStreamClose);
 		stream->seek = bufferStreamSeek;
 
-		glo->colorspace = fz_device_rgb;
+		glo->colorspace = fz_device_rgb(ctx);
 
 		LOGE("Opening document...");
 		fz_try(ctx)
@@ -428,6 +432,10 @@ JNI_FN(MuPDFCore_openBuffer)(JNIEnv * env, jobject thiz)
 			fz_throw(ctx, "Cannot open memory document");
 		}
 		LOGE("Done!");
+	}
+	fz_always(ctx)
+	{
+		fz_close(stream);
 	}
 	fz_catch(ctx)
 	{
@@ -447,8 +455,29 @@ JNIEXPORT int JNICALL
 JNI_FN(MuPDFCore_countPagesInternal)(JNIEnv *env, jobject thiz)
 {
 	globals *glo = get_globals(env, thiz);
+	fz_context *ctx = glo->ctx;
+	int count = 0;
 
-	return fz_count_pages(glo->doc);
+	fz_try(ctx)
+	{
+		count = fz_count_pages(glo->doc);
+	}
+	fz_catch(ctx)
+	{
+		LOGE("exception while counting pages: %s", ctx->error->message);
+	}
+	return count;
+}
+
+JNIEXPORT jstring JNICALL
+JNI_FN(MuPDFCore_fileFormatInternal)(JNIEnv * env, jobject thiz)
+{
+	char info[64];
+	globals *glo = get_globals(env, thiz);
+
+	fz_meta(glo->doc, FZ_META_FORMAT_INFO, info, sizeof(info));
+
+	return (*env)->NewStringUTF(env, info);
 }
 
 JNIEXPORT void JNICALL
@@ -633,19 +662,18 @@ JNI_FN(MuPDFCore_drawPage)(JNIEnv *env, jobject thiz, jobject bitmap,
 			pc->page_list = fz_new_display_list(ctx);
 			dev = fz_new_list_device(ctx, pc->page_list);
 			fz_run_page_contents(doc, pc->page, dev, &fz_identity, NULL);
+			fz_free_device(dev);
+			dev = NULL;
 		}
 		if (pc->annot_list == NULL)
 		{
 			fz_annot *annot;
-			if (dev)
-			{
-				fz_free_device(dev);
-				dev = NULL;
-			}
 			pc->annot_list = fz_new_display_list(ctx);
 			dev = fz_new_list_device(ctx, pc->annot_list);
 			for (annot = fz_first_annot(doc, pc->page); annot; annot = fz_next_annot(doc, annot))
 				fz_run_annot(doc, pc->page, annot, dev, &fz_identity, NULL);
+			fz_free_device(dev);
+			dev = NULL;
 		}
 		bbox.x0 = patchX;
 		bbox.y0 = patchY;
@@ -695,9 +723,13 @@ JNI_FN(MuPDFCore_drawPage)(JNIEnv *env, jobject thiz, jobject bitmap,
 		fz_drop_pixmap(ctx, pix);
 		LOGE("Rendered");
 	}
-	fz_catch(ctx)
+	fz_always(ctx)
 	{
 		fz_free_device(dev);
+		dev = NULL;
+	}
+	fz_catch(ctx)
+	{
 		LOGE("Render failed");
 	}
 
@@ -803,17 +835,17 @@ JNI_FN(MuPDFCore_updatePageInternal)(JNIEnv *env, jobject thiz, jobject bitmap, 
 			pc->page_list = fz_new_display_list(ctx);
 			dev = fz_new_list_device(ctx, pc->page_list);
 			fz_run_page_contents(doc, pc->page, dev, &fz_identity, NULL);
+			fz_free_device(dev);
+			dev = NULL;
 		}
 
 		if (pc->annot_list == NULL) {
-			if (dev) {
-				fz_free_device(dev);
-				dev = NULL;
-			}
 			pc->annot_list = fz_new_display_list(ctx);
 			dev = fz_new_list_device(ctx, pc->annot_list);
 			for (annot = fz_first_annot(doc, pc->page); annot; annot = fz_next_annot(doc, annot))
 				fz_run_annot(doc, pc->page, annot, dev, &fz_identity, NULL);
+			fz_free_device(dev);
+			dev = NULL;
 		}
 
 		bbox.x0 = patchX;
@@ -863,9 +895,13 @@ JNI_FN(MuPDFCore_updatePageInternal)(JNIEnv *env, jobject thiz, jobject bitmap, 
 
 		LOGE("Rendered");
 	}
-	fz_catch(ctx)
+	fz_always(ctx)
 	{
 		fz_free_device(dev);
+		dev = NULL;
+	}
+	fz_catch(ctx)
+	{
 		LOGE("Render failed");
 	}
 
@@ -875,83 +911,46 @@ JNI_FN(MuPDFCore_updatePageInternal)(JNIEnv *env, jobject thiz, jobject bitmap, 
 	return 1;
 }
 
-static fz_text_char textcharat(fz_text_page *page, int idx)
-{
-	static fz_text_char emptychar = { {0,0,0,0}, ' ' };
-	fz_text_block *block;
-	fz_text_line *line;
-	fz_text_span *span;
-	int ofs = 0;
-	for (block = page->blocks; block < page->blocks + page->len; block++)
-	{
-		for (line = block->lines; line < block->lines + block->len; line++)
-		{
-			for (span = line->spans; span < line->spans + line->len; span++)
-			{
-				if (idx < ofs + span->len)
-					return span->text[idx - ofs];
-				/* pseudo-newline */
-				if (span + 1 == line->spans + line->len)
-				{
-					if (idx == ofs + span->len)
-						return emptychar;
-					ofs++;
-				}
-				ofs += span->len;
-			}
-		}
-	}
-	return emptychar;
-}
-
 static int
 charat(fz_text_page *page, int idx)
 {
-	return textcharat(page, idx).c;
+	fz_char_and_box cab;
+	return fz_text_char_at(&cab, page, idx)->c;
 }
 
 static fz_rect
 bboxcharat(fz_text_page *page, int idx)
 {
-	return textcharat(page, idx).bbox;
+	fz_char_and_box cab;
+	return fz_text_char_at(&cab, page, idx)->bbox;
 }
 
 static int
 textlen(fz_text_page *page)
 {
-	fz_text_block *block;
-	fz_text_line *line;
-	fz_text_span *span;
 	int len = 0;
-	for (block = page->blocks; block < page->blocks + page->len; block++)
+	int block_num;
+
+	for (block_num = 0; block_num < page->len; block_num++)
 	{
+		fz_text_block *block;
+		fz_text_line *line;
+
+		if (page->blocks[block_num].type != FZ_PAGE_BLOCK_TEXT)
+			continue;
+		block = page->blocks[block_num].u.text;
 		for (line = block->lines; line < block->lines + block->len; line++)
 		{
-			for (span = line->spans; span < line->spans + line->len; span++)
+			fz_text_span *span;
+
+			for (span = line->first_span; span; span = span->next)
+			{
 				len += span->len;
+			}
 			len++; /* pseudo-newline */
 		}
 	}
 	return len;
-}
-
-static int
-match(fz_text_page *page, const char *s, int n)
-{
-	int orig = n;
-	int c;
-	while (*s) {
-		s += fz_chartorune(&c, (char *)s);
-		if (c == ' ' && charat(page, n) == ' ') {
-			while (charat(page, n) == ' ')
-				n++;
-		} else {
-			if (tolower(c) != tolower(charat(page, n)))
-				return 0;
-			n++;
-		}
-	}
-	return n - orig;
 }
 
 static int
@@ -1014,8 +1013,8 @@ JNIEXPORT jboolean JNICALL
 JNI_FN(MuPDFCore_authenticatePasswordInternal)(JNIEnv *env, jobject thiz, jstring password)
 {
 	const char *pw;
-	int         result;
-	globals    *glo = get_globals(env, thiz);
+	int result;
+	globals *glo = get_globals(env, thiz);
 
 	pw = (*env)->GetStringUTFChars(env, password, NULL);
 	if (pw == NULL)
@@ -1029,22 +1028,24 @@ JNI_FN(MuPDFCore_authenticatePasswordInternal)(JNIEnv *env, jobject thiz, jstrin
 JNIEXPORT jboolean JNICALL
 JNI_FN(MuPDFCore_hasOutlineInternal)(JNIEnv * env, jobject thiz)
 {
-	globals    *glo = get_globals(env, thiz);
+	globals *glo = get_globals(env, thiz);
 	fz_outline *outline = fz_load_outline(glo->doc);
 
+	fz_free_outline(glo->ctx, outline);
 	return (outline == NULL) ? JNI_FALSE : JNI_TRUE;
 }
 
 JNIEXPORT jobjectArray JNICALL
 JNI_FN(MuPDFCore_getOutlineInternal)(JNIEnv * env, jobject thiz)
 {
-	jclass        olClass;
-	jmethodID     ctor;
-	jobjectArray  arr;
-	jobject       ol;
-	fz_outline   *outline;
-	int           nItems;
-	globals      *glo = get_globals(env, thiz);
+	jclass olClass;
+	jmethodID ctor;
+	jobjectArray arr;
+	jobject ol;
+	fz_outline *outline;
+	int nItems;
+	globals *glo = get_globals(env, thiz);
+	jobjectArray ret;
 
 	olClass = (*env)->FindClass(env, PACKAGENAME "/OutlineItem");
 	if (olClass == NULL) return NULL;
@@ -1060,32 +1061,34 @@ JNI_FN(MuPDFCore_getOutlineInternal)(JNIEnv * env, jobject thiz)
 					NULL);
 	if (arr == NULL) return NULL;
 
-	return fillInOutlineItems(env, olClass, ctor, arr, 0, outline, 0) > 0
+	ret = fillInOutlineItems(env, olClass, ctor, arr, 0, outline, 0) > 0
 			? arr
 			:NULL;
+	fz_free_outline(glo->ctx, outline);
+	return ret;
 }
 
 JNIEXPORT jobjectArray JNICALL
 JNI_FN(MuPDFCore_searchPage)(JNIEnv * env, jobject thiz, jstring jtext)
 {
-	jclass         rectClass;
-	jmethodID      ctor;
-	jobjectArray   arr;
-	jobject        rect;
+	jclass rectClass;
+	jmethodID ctor;
+	jobjectArray arr;
+	jobject rect;
 	fz_text_sheet *sheet = NULL;
-	fz_text_page  *text = NULL;
-	fz_device     *dev  = NULL;
-	float          zoom;
-	fz_matrix      ctm;
-	int            pos;
-	int            len;
-	int            i, n;
-	int            hit_count = 0;
-	const char    *str;
-	globals       *glo = get_globals(env, thiz);
-	fz_context    *ctx = glo->ctx;
-	fz_document   *doc = glo->doc;
-	page_cache    *pc = &glo->pages[glo->current];
+	fz_text_page *text = NULL;
+	fz_device *dev = NULL;
+	float zoom;
+	fz_matrix ctm;
+	int pos;
+	int len;
+	int i, n;
+	int hit_count = 0;
+	const char *str;
+	globals *glo = get_globals(env, thiz);
+	fz_context *ctx = glo->ctx;
+	fz_document *doc = glo->doc;
+	page_cache *pc = &glo->pages[glo->current];
 
 	rectClass = (*env)->FindClass(env, "android/graphics/RectF");
 	if (rectClass == NULL) return NULL;
@@ -1111,25 +1114,12 @@ JNI_FN(MuPDFCore_searchPage)(JNIEnv * env, jobject thiz, jstring jtext)
 		fz_transform_rect(&mbrect, &ctm);
 		sheet = fz_new_text_sheet(ctx);
 		text = fz_new_text_page(ctx, &mbrect);
-		dev  = fz_new_text_device(ctx, sheet, text);
+		dev = fz_new_text_device(ctx, sheet, text);
 		fz_run_page(doc, pc->page, dev, &ctm, NULL);
 		fz_free_device(dev);
 		dev = NULL;
 
-		len = textlen(text);
-		for (pos = 0; pos < len; pos++)
-		{
-			fz_rect rr = fz_empty_rect;
-			n = match(text, str, pos);
-			for (i = 0; i < n; i++)
-			{
-				fz_rect bbox = bboxcharat(text, pos + i);
-				fz_union_rect(&rr, &bbox);
-			}
-
-			if (!fz_is_empty_rect(&rr) && hit_count < MAX_SEARCH_HITS)
-				glo->hit_bbox[hit_count++] = rr;
-		}
+		hit_count = fz_search_text_page(ctx, text, str, glo->hit_bbox, MAX_SEARCH_HITS);
 	}
 	fz_always(ctx)
 	{
@@ -1183,7 +1173,7 @@ JNI_FN(MuPDFCore_text)(JNIEnv * env, jobject thiz)
 	jobjectArray barr = NULL;
 	fz_text_sheet *sheet = NULL;
 	fz_text_page *text = NULL;
-	fz_device *dev  = NULL;
+	fz_device *dev = NULL;
 	float zoom;
 	fz_matrix ctm;
 	globals *glo = get_globals(env, thiz);
@@ -1217,7 +1207,7 @@ JNI_FN(MuPDFCore_text)(JNIEnv * env, jobject thiz)
 		fz_transform_rect(&mbrect, &ctm);
 		sheet = fz_new_text_sheet(ctx);
 		text = fz_new_text_page(ctx, &mbrect);
-		dev  = fz_new_text_device(ctx, sheet, text);
+		dev = fz_new_text_device(ctx, sheet, text);
 		fz_run_page(doc, pc->page, dev, &ctm, NULL);
 		fz_free_device(dev);
 		dev = NULL;
@@ -1227,26 +1217,39 @@ JNI_FN(MuPDFCore_text)(JNIEnv * env, jobject thiz)
 
 		for (b = 0; b < text->len; b++)
 		{
-			fz_text_block *block = &text->blocks[b];
-			jobjectArray *larr = (*env)->NewObjectArray(env, block->len, textLineClass, NULL);
+			fz_text_block *block;
+			jobjectArray *larr;
+
+			if (text->blocks[b].type != FZ_PAGE_BLOCK_TEXT)
+				continue;
+			block = text->blocks[b].u.text;
+			larr = (*env)->NewObjectArray(env, block->len, textLineClass, NULL);
 			if (larr == NULL) fz_throw(ctx, "NewObjectArray failed");
 
 			for (l = 0; l < block->len; l++)
 			{
 				fz_text_line *line = &block->lines[l];
-				jobjectArray *sarr = (*env)->NewObjectArray(env, line->len, textSpanClass, NULL);
+				jobjectArray *sarr;
+				fz_text_span *span;
+				int len = 0;
+
+				for (span = line->first_span; span; span = span->next)
+					len++;
+
+				sarr = (*env)->NewObjectArray(env, len, textSpanClass, NULL);
 				if (sarr == NULL) fz_throw(ctx, "NewObjectArray failed");
 
-				for (s = 0; s < line->len; s++)
+				for (s=0, span = line->first_span; span; s++, span = span->next)
 				{
-					fz_text_span *span = &line->spans[s];
 					jobjectArray *carr = (*env)->NewObjectArray(env, span->len, textCharClass, NULL);
 					if (carr == NULL) fz_throw(ctx, "NewObjectArray failed");
 
 					for (c = 0; c < span->len; c++)
 					{
 						fz_text_char *ch = &span->text[c];
-						jobject cobj = (*env)->NewObject(env, textCharClass, ctor, ch->bbox.x0, ch->bbox.y0, ch->bbox.x1, ch->bbox.y1, ch->c);
+						fz_rect bbox;
+						fz_text_char_bbox(&bbox, span, c);
+						jobject cobj = (*env)->NewObject(env, textCharClass, ctor, bbox.x0, bbox.y0, bbox.x1, bbox.y1, ch->c);
 						if (cobj == NULL) fz_throw(ctx, "NewObjectfailed");
 
 						(*env)->SetObjectArrayElement(env, carr, c, cobj);
@@ -1289,7 +1292,7 @@ JNI_FN(MuPDFCore_textAsHtml)(JNIEnv * env, jobject thiz)
 {
 	fz_text_sheet *sheet = NULL;
 	fz_text_page *text = NULL;
-	fz_device *dev  = NULL;
+	fz_device *dev = NULL;
 	fz_matrix ctm;
 	globals *glo = get_globals(env, thiz);
 	fz_context *ctx = glo->ctx;
@@ -1313,18 +1316,23 @@ JNI_FN(MuPDFCore_textAsHtml)(JNIEnv * env, jobject thiz)
 		fz_transform_rect(&mbrect, &ctm);
 		sheet = fz_new_text_sheet(ctx);
 		text = fz_new_text_page(ctx, &mbrect);
-		dev  = fz_new_text_device(ctx, sheet, text);
+		dev = fz_new_text_device(ctx, sheet, text);
 		fz_run_page(doc, pc->page, dev, &ctm, NULL);
 		fz_free_device(dev);
 		dev = NULL;
 
+		fz_analyze_text(ctx, sheet, text);
+
 		buf = fz_new_buffer(ctx, 256);
-		out = fz_new_output_buffer(ctx, buf);
+		out = fz_new_output_with_buffer(ctx, buf);
 		fz_printf(out, "<html>\n");
 		fz_printf(out, "<style>\n");
 		fz_printf(out, "body{margin:0;}\n");
 		fz_printf(out, "div.page{background-color:white;}\n");
 		fz_printf(out, "div.block{margin:0pt;padding:0pt;}\n");
+		fz_printf(out, "div.metaline{display:table;width:100%%}\n");
+		fz_printf(out, "div.line{display:table-row;}\n");
+		fz_printf(out, "div.cell{display:table-cell;padding-left:0.25em;padding-right:0.25em}\n");
 		//fz_printf(out, "p{margin:0;padding:0;}\n");
 		fz_printf(out, "</style>\n");
 		fz_printf(out, "<body style=\"margin:0\"><div style=\"padding:10px\" id=\"content\">");
@@ -1463,6 +1471,99 @@ JNI_FN(MuPDFCore_addMarkupAnnotationInternal)(JNIEnv * env, jobject thiz, jobjec
 }
 
 JNIEXPORT void JNICALL
+JNI_FN(MuPDFCore_addInkAnnotationInternal)(JNIEnv * env, jobject thiz, jobjectArray arcs)
+{
+	globals *glo = get_globals(env, thiz);
+	fz_context *ctx = glo->ctx;
+	fz_document *doc = glo->doc;
+	fz_interactive *idoc = fz_interact(doc);
+	page_cache *pc = &glo->pages[glo->current];
+	jclass pt_cls;
+	jfieldID x_fid, y_fid;
+	int i, j, k, n;
+	fz_point *pts = NULL;
+	int *counts = NULL;
+	int total = 0;
+	float color[3];
+
+	if (idoc == NULL)
+		return;
+
+	color[0] = 1.0;
+	color[1] = 0.0;
+	color[2] = 0.0;
+
+	fz_var(pts);
+	fz_var(counts);
+	fz_try(ctx)
+	{
+		fz_annot *annot;
+		fz_matrix ctm;
+
+		float zoom = glo->resolution / 72;
+		zoom = 1.0 / zoom;
+		fz_scale(&ctm, zoom, zoom);
+		pt_cls = (*env)->FindClass(env, "android.graphics.PointF");
+		if (pt_cls == NULL) fz_throw(ctx, "FindClass");
+		x_fid = (*env)->GetFieldID(env, pt_cls, "x", "F");
+		if (x_fid == NULL) fz_throw(ctx, "GetFieldID(x)");
+		y_fid = (*env)->GetFieldID(env, pt_cls, "y", "F");
+		if (y_fid == NULL) fz_throw(ctx, "GetFieldID(y)");
+
+		n = (*env)->GetArrayLength(env, arcs);
+
+		counts = fz_malloc_array(ctx, n, sizeof(int));
+
+		for (i = 0; i < n; i++)
+		{
+			jobjectArray arc = (jobjectArray)(*env)->GetObjectArrayElement(env, arcs, i);
+			int count = (*env)->GetArrayLength(env, arc);
+
+			counts[i] = count;
+			total += count;
+		}
+
+		pts = fz_malloc_array(ctx, total, sizeof(fz_point));
+
+		k = 0;
+		for (i = 0; i < n; i++)
+		{
+			jobjectArray arc = (jobjectArray)(*env)->GetObjectArrayElement(env, arcs, i);
+			int count = counts[i];
+
+			for (j = 0; j < count; j++)
+			{
+				jobject pt = (*env)->GetObjectArrayElement(env, arc, j);
+
+				pts[k].x = pt ? (*env)->GetFloatField(env, pt, x_fid) : 0.0f;
+				pts[k].y = pt ? (*env)->GetFloatField(env, pt, y_fid) : 0.0f;
+				fz_transform_point(&pts[k], &ctm);
+				k++;
+			}
+		}
+
+		annot = fz_create_annot(idoc, pc->page, FZ_ANNOT_INK);
+
+		fz_set_ink_annot_list(idoc, annot, pts, counts, n, color, INK_THICKNESS);
+
+		dump_annotation_display_lists(glo);
+	}
+	fz_always(ctx)
+	{
+		fz_free(ctx, pts);
+		fz_free(ctx, counts);
+	}
+	fz_catch(ctx)
+	{
+		LOGE("addInkAnnotation: %s failed", ctx->error->message);
+		jclass cls = (*env)->FindClass(env, "java/lang/OutOfMemoryError");
+		if (cls != NULL)
+			(*env)->ThrowNew(env, cls, "Out of memory in MuPDFCore_searchPage");
+		(*env)->DeleteLocalRef(env, cls);
+	}
+}
+
+JNIEXPORT void JNICALL
 JNI_FN(MuPDFCore_deleteAnnotationInternal)(JNIEnv * env, jobject thiz, int annot_index)
 {
 	globals *glo = get_globals(env, thiz);
@@ -1478,13 +1579,13 @@ JNI_FN(MuPDFCore_deleteAnnotationInternal)(JNIEnv * env, jobject thiz, int annot
 
 	fz_try(ctx)
 	{
-	    annot = fz_first_annot(glo->doc, pc->page);
-	    for (i = 0; i < annot_index && annot; i++)
-	       annot = fz_next_annot(glo->doc, annot);
+		annot = fz_first_annot(glo->doc, pc->page);
+		for (i = 0; i < annot_index && annot; i++)
+			annot = fz_next_annot(glo->doc, annot);
 
-	    if (annot)
+		if (annot)
 		{
-		    fz_delete_annot(idoc, pc->page, annot);
+			fz_delete_annot(idoc, pc->page, annot);
 			dump_annotation_display_lists(glo);
 		}
 	}
@@ -1494,6 +1595,8 @@ JNI_FN(MuPDFCore_deleteAnnotationInternal)(JNIEnv * env, jobject thiz, int annot
 	}
 }
 
+/* Close the document, at least enough to be able to save over it. This
+ * may be called again later, so must be idempotent. */
 static void close_doc(globals *glo)
 {
 	int i;
@@ -1515,12 +1618,21 @@ JNI_FN(MuPDFCore_destroying)(JNIEnv * env, jobject thiz)
 {
 	globals *glo = get_globals(env, thiz);
 
+	if (glo == NULL)
+		return;
 	LOGI("Destroying");
-	close_doc(glo);
 	fz_free(glo->ctx, glo->current_path);
 	glo->current_path = NULL;
+	close_doc(glo);
+	fz_free_context(glo->ctx);
+	glo->ctx = NULL;
 	free(glo);
-
+#ifdef MEMENTO
+	LOGI("Destroying dump start");
+	Memento_listBlocks();
+	Memento_stats();
+	LOGI("Destroying dump end");
+#endif
 #ifdef NDK_PROFILER
 	// Apparently we should really be writing to whatever path we get
 	// from calling getFilesDir() in the java part, which supposedly
@@ -1534,22 +1646,22 @@ JNI_FN(MuPDFCore_destroying)(JNIEnv * env, jobject thiz)
 JNIEXPORT jobjectArray JNICALL
 JNI_FN(MuPDFCore_getPageLinksInternal)(JNIEnv * env, jobject thiz, int pageNumber)
 {
-	jclass       linkInfoClass;
-	jclass       linkInfoInternalClass;
-	jclass       linkInfoExternalClass;
-	jclass       linkInfoRemoteClass;
-	jmethodID    ctorInternal;
-	jmethodID    ctorExternal;
-	jmethodID    ctorRemote;
+	jclass linkInfoClass;
+	jclass linkInfoInternalClass;
+	jclass linkInfoExternalClass;
+	jclass linkInfoRemoteClass;
+	jmethodID ctorInternal;
+	jmethodID ctorExternal;
+	jmethodID ctorRemote;
 	jobjectArray arr;
-	jobject      linkInfo;
-	fz_matrix    ctm;
-	float        zoom;
-	fz_link     *list;
-	fz_link     *link;
-	int          count;
-	page_cache  *pc;
-	globals     *glo = get_globals(env, thiz);
+	jobject linkInfo;
+	fz_matrix ctm;
+	float zoom;
+	fz_link *list;
+	fz_link *link;
+	int count;
+	page_cache *pc;
+	globals *glo = get_globals(env, thiz);
 
 	linkInfoClass = (*env)->FindClass(env, PACKAGENAME "/LinkInfo");
 	if (linkInfoClass == NULL) return NULL;
@@ -1588,7 +1700,11 @@ JNI_FN(MuPDFCore_getPageLinksInternal)(JNIEnv * env, jobject thiz, int pageNumbe
 	}
 
 	arr = (*env)->NewObjectArray(env, count, linkInfoClass, NULL);
-	if (arr == NULL) return NULL;
+	if (arr == NULL)
+	{
+		fz_drop_link(glo->ctx, list);
+		return NULL;
+	}
 
 	count = 0;
 	for (link = list; link; link = link->next)
@@ -1628,11 +1744,16 @@ JNI_FN(MuPDFCore_getPageLinksInternal)(JNIEnv * env, jobject thiz, int pageNumbe
 			continue;
 		}
 
-		if (linkInfo == NULL) return NULL;
+		if (linkInfo == NULL)
+		{
+			fz_drop_link(glo->ctx, list);
+			return NULL;
+		}
 		(*env)->SetObjectArrayElement(env, arr, count, linkInfo);
 		(*env)->DeleteLocalRef(env, linkInfo);
 		count++;
 	}
+	fz_drop_link(glo->ctx, list);
 
 	return arr;
 }
@@ -1640,17 +1761,17 @@ JNI_FN(MuPDFCore_getPageLinksInternal)(JNIEnv * env, jobject thiz, int pageNumbe
 JNIEXPORT jobjectArray JNICALL
 JNI_FN(MuPDFCore_getWidgetAreasInternal)(JNIEnv * env, jobject thiz, int pageNumber)
 {
-	jclass       rectFClass;
-	jmethodID    ctor;
+	jclass rectFClass;
+	jmethodID ctor;
 	jobjectArray arr;
-	jobject      rectF;
+	jobject rectF;
 	fz_interactive *idoc;
 	fz_widget *widget;
-	fz_matrix    ctm;
-	float        zoom;
-	int          count;
-	page_cache  *pc;
-	globals     *glo = get_globals(env, thiz);
+	fz_matrix ctm;
+	float zoom;
+	int count;
+	page_cache *pc;
+	globals *glo = get_globals(env, thiz);
 
 	rectFClass = (*env)->FindClass(env, "android/graphics/RectF");
 	if (rectFClass == NULL) return NULL;
@@ -2262,4 +2383,18 @@ JNI_FN(MuPDFCore_saveInternal)(JNIEnv * env, jobject thiz)
 			free(tmp);
 		}
 	}
+}
+
+JNIEXPORT void JNICALL
+JNI_FN(MuPDFCore_dumpMemoryInternal)(JNIEnv * env, jobject thiz)
+{
+	globals *glo = get_globals(env, thiz);
+	fz_context *ctx = glo->ctx;
+
+#ifdef MEMENTO
+	LOGE("dumpMemoryInternal start");
+	Memento_listNewBlocks();
+	Memento_stats();
+	LOGE("dumpMemoryInternal end");
+#endif
 }

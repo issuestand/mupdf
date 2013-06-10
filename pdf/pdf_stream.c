@@ -7,12 +7,15 @@
 int
 pdf_is_stream(pdf_document *xref, int num, int gen)
 {
-	if (num < 0 || num >= xref->len)
+	pdf_xref_entry *entry;
+
+	if (num < 0 || num >= pdf_xref_len(xref))
 		return 0;
 
 	pdf_cache_object(xref, num, gen);
 
-	return xref->table[num].stm_ofs != 0 || xref->table[num].stm_buf;
+	entry = pdf_get_xref_entry(xref, num);
+	return entry->stm_ofs != 0 || entry->stm_buf;
 }
 
 /*
@@ -54,7 +57,8 @@ build_filter(fz_stream *chain, pdf_document * xref, pdf_obj * f, pdf_obj * p, in
 	char *s = pdf_to_name(f);
 
 	int predictor = pdf_to_int(pdf_dict_gets(p, "Predictor"));
-	int columns = pdf_to_int(pdf_dict_gets(p, "Columns"));
+	pdf_obj *columns_obj = pdf_dict_gets(p, "Columns");
+	int columns = pdf_to_int(columns_obj);
 	int colors = pdf_to_int(pdf_dict_gets(p, "Colors"));
 	int bpc = pdf_to_int(pdf_dict_gets(p, "BitsPerComponent"));
 
@@ -69,7 +73,6 @@ build_filter(fz_stream *chain, pdf_document * xref, pdf_obj * f, pdf_obj * p, in
 		pdf_obj *k = pdf_dict_gets(p, "K");
 		pdf_obj *eol = pdf_dict_gets(p, "EndOfLine");
 		pdf_obj *eba = pdf_dict_gets(p, "EncodedByteAlign");
-		pdf_obj *columns = pdf_dict_gets(p, "Columns");
 		pdf_obj *rows = pdf_dict_gets(p, "Rows");
 		pdf_obj *eob = pdf_dict_gets(p, "EndOfBlock");
 		pdf_obj *bi1 = pdf_dict_gets(p, "BlackIs1");
@@ -80,7 +83,7 @@ build_filter(fz_stream *chain, pdf_document * xref, pdf_obj * f, pdf_obj * p, in
 			params->u.fax.k = (k ? pdf_to_int(k) : 0);
 			params->u.fax.end_of_line = (eol ? pdf_to_bool(eol) : 0);
 			params->u.fax.encoded_byte_align = (eba ? pdf_to_bool(eba) : 0);
-			params->u.fax.columns = (columns ? pdf_to_int(columns) : 1728);
+			params->u.fax.columns = (columns_obj ? columns : 1728);
 			params->u.fax.rows = (rows ? pdf_to_int(rows) : 0);
 			params->u.fax.end_of_block = (eob ? pdf_to_bool(eob) : 1);
 			params->u.fax.black_is_1 = (bi1 ? pdf_to_bool(bi1) : 0);
@@ -90,7 +93,7 @@ build_filter(fz_stream *chain, pdf_document * xref, pdf_obj * f, pdf_obj * p, in
 				k ? pdf_to_int(k) : 0,
 				eol ? pdf_to_bool(eol) : 0,
 				eba ? pdf_to_bool(eba) : 0,
-				columns ? pdf_to_int(columns) : 1728,
+				columns_obj ? columns : 1728,
 				rows ? pdf_to_int(rows) : 0,
 				eob ? pdf_to_bool(eob) : 1,
 				bi1 ? pdf_to_bool(bi1) : 0);
@@ -229,8 +232,12 @@ pdf_open_raw_filter(fz_stream *chain, pdf_document *xref, pdf_obj *stmobj, int n
 	int hascrypt;
 	int len;
 
-	if (num > 0 && num < xref->len && xref->table[num].stm_buf)
-		return fz_open_buffer(ctx, xref->table[num].stm_buf);
+	if (num > 0 && num < pdf_xref_len(xref))
+	{
+		pdf_xref_entry *entry = pdf_get_xref_entry(xref, num);
+		if (entry->stm_buf)
+			return fz_open_buffer(ctx, entry->stm_buf);
+	}
 
 	/* don't close chain when we close this filter */
 	fz_keep_stream(chain);
@@ -322,10 +329,10 @@ pdf_open_raw_renumbered_stream(pdf_document *xref, int num, int gen, int orig_nu
 {
 	pdf_xref_entry *x;
 
-	if (num < 0 || num >= xref->len)
+	if (num < 0 || num >= pdf_xref_len(xref))
 		fz_throw(xref->ctx, "object id out of range (%d %d R)", num, gen);
 
-	x = xref->table + num;
+	x = pdf_get_xref_entry(xref, num);
 
 	pdf_cache_object(xref, num, gen);
 
@@ -340,10 +347,10 @@ pdf_open_image_stream(pdf_document *xref, int num, int gen, int orig_num, int or
 {
 	pdf_xref_entry *x;
 
-	if (num < 0 || num >= xref->len)
+	if (num < 0 || num >= pdf_xref_len(xref))
 		fz_throw(xref->ctx, "object id out of range (%d %d R)", num, gen);
 
-	x = xref->table + num;
+	x = pdf_get_xref_entry(xref, num);
 
 	pdf_cache_object(xref, num, gen);
 
@@ -390,8 +397,12 @@ pdf_load_raw_renumbered_stream(pdf_document *xref, int num, int gen, int orig_nu
 	int len;
 	fz_buffer *buf;
 
-	if (num > 0 && num < xref->len && xref->table[num].stm_buf)
-		return fz_keep_buffer(xref->ctx, xref->table[num].stm_buf);
+	if (num > 0 && num < pdf_xref_len(xref))
+	{
+		pdf_xref_entry *entry = pdf_get_xref_entry(xref, num);
+		if (entry->stm_buf)
+			return fz_keep_buffer(xref->ctx, entry->stm_buf);
+	}
 
 	dict = pdf_load_object(xref, num, gen);
 
@@ -434,8 +445,12 @@ pdf_load_image_stream(pdf_document *xref, int num, int gen, int orig_num, int or
 
 	fz_var(buf);
 
-	if (num > 0 && num < xref->len && xref->table[num].stm_buf)
-		return fz_keep_buffer(xref->ctx, xref->table[num].stm_buf);
+	if (num > 0 && num < pdf_xref_len(xref))
+	{
+		pdf_xref_entry *entry = pdf_get_xref_entry(xref, num);
+		if (entry->stm_buf)
+			return fz_keep_buffer(xref->ctx, entry->stm_buf);
+	}
 
 	dict = pdf_load_object(xref, num, gen);
 

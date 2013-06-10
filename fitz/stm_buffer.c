@@ -26,6 +26,21 @@ fz_new_buffer(fz_context *ctx, int size)
 }
 
 fz_buffer *
+fz_new_buffer_from_data(fz_context *ctx, unsigned char *data, int size)
+{
+	fz_buffer *b;
+
+	b = fz_malloc_struct(ctx, fz_buffer);
+	b->refs = 1;
+	b->data = data;
+	b->cap = size;
+	b->len = size;
+	b->unused_bits = 0;
+
+	return b;
+}
+
+fz_buffer *
 fz_keep_buffer(fz_context *ctx, fz_buffer *buf)
 {
 	if (buf)
@@ -107,7 +122,7 @@ fz_buffer_cat(fz_context *ctx, fz_buffer *buf, fz_buffer *extra)
 	buf->len += extra->len;
 }
 
-void fz_write_buffer(fz_context *ctx, fz_buffer *buf, unsigned char *data, int len)
+void fz_write_buffer(fz_context *ctx, fz_buffer *buf, const void *data, int len)
 {
 	if (buf->len + len > buf->cap)
 		fz_ensure_buffer(ctx, buf, buf->len + len);

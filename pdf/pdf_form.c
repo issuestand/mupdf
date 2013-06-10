@@ -376,7 +376,7 @@ static fz_rect *measure_text(pdf_document *doc, font_info *font_rec, const fz_ma
 
 static void fzbuf_print_color(fz_context *ctx, fz_buffer *fzbuf, pdf_obj *arr, int stroke, float adj)
 {
-	switch(pdf_array_len(arr))
+	switch (pdf_array_len(arr))
 	{
 	case 1:
 		fz_buffer_printf(ctx, fzbuf, stroke?"%f G\n":"%f g\n",
@@ -837,7 +837,7 @@ static fz_buffer *create_text_appearance(pdf_document *doc, const fz_rect *bbox,
 			{
 				fz_translate(&tm, rect.x0, rect.y1 - (height+(ascent-descent)*fontsize)/2.0);
 
-				switch(info->q)
+				switch (info->q)
 				{
 				case Q_Right: tm.e += width; break;
 				case Q_Cent: tm.e += width/2; break;
@@ -1578,7 +1578,7 @@ static void add_field_hierarchy_to_array(pdf_obj *array, pdf_obj *field)
 static pdf_obj *specified_fields(pdf_document *doc, pdf_obj *fields, int exclude)
 {
 	fz_context *ctx = doc->ctx;
-	pdf_obj *form = pdf_dict_getp(doc->trailer, "Root/AcroForm/Fields");
+	pdf_obj *form = pdf_dict_getp(pdf_trailer(doc), "Root/AcroForm/Fields");
 	int i, n;
 	pdf_obj *result = pdf_new_array(ctx, 0);
 	pdf_obj *nil = NULL;
@@ -1720,7 +1720,6 @@ static void execute_action(pdf_document *doc, pdf_obj *obj, pdf_obj *a)
 
 static void update_text_markup_appearance(pdf_document *doc, pdf_obj *annot, fz_annot_type type)
 {
-	fz_context *ctx = doc->ctx;
 	float color[3];
 	float alpha;
 	float line_height;
@@ -1767,7 +1766,7 @@ void pdf_update_appearance(pdf_document *doc, pdf_obj *obj)
 		switch (type)
 		{
 		case FZ_ANNOT_WIDGET:
-			switch(pdf_field_type(doc, obj))
+			switch (pdf_field_type(doc, obj))
 			{
 			case FZ_WIDGET_TYPE_TEXT:
 				{
@@ -1806,6 +1805,11 @@ void pdf_update_appearance(pdf_document *doc, pdf_obj *obj)
 		case FZ_ANNOT_UNDERLINE:
 		case FZ_ANNOT_HIGHLIGHT:
 			update_text_markup_appearance(doc, obj, type);
+			break;
+		case FZ_ANNOT_INK:
+			pdf_set_ink_obj_appearance(doc, obj);
+			break;
+		default:
 			break;
 		}
 
@@ -1920,7 +1924,7 @@ static void recalculate(pdf_document *doc)
 	doc->recalculating = 1;
 	fz_try(ctx)
 	{
-		pdf_obj *co = pdf_dict_getp(doc->trailer, "Root/AcroForm/CO");
+		pdf_obj *co = pdf_dict_getp(pdf_trailer(doc), "Root/AcroForm/CO");
 
 		if (co && doc->js)
 		{
@@ -2005,9 +2009,9 @@ static void toggle_check_box(pdf_document *doc, pdf_obj *obj)
 			/* For radio buttons, first turn off all buttons in the group and
 			 * then set the one that was clicked */
 			pdf_obj *kids = pdf_dict_gets(grp, "Kids");
-			int i, n = pdf_array_len(kids);
 
-			for (i = 0; i < n; i++)
+			len = pdf_array_len(kids);
+			for (i = 0; i < len; i++)
 				check_off(ctx, pdf_array_get(kids, i));
 
 			pdf_dict_puts(obj, "AS", key);
@@ -2116,7 +2120,7 @@ int pdf_pass_event(pdf_document *doc, pdf_page *page, fz_ui_event *ui_event)
 
 				if (annot)
 				{
-					switch(annot->widget_type)
+					switch (annot->widget_type)
 					{
 					case FZ_WIDGET_TYPE_RADIOBUTTON:
 					case FZ_WIDGET_TYPE_CHECKBOX:
@@ -2746,7 +2750,7 @@ int pdf_choice_widget_is_multiselect(pdf_document *doc, fz_widget *tw)
 
 	if (!annot) return 0;
 
-	switch(pdf_field_type(doc, annot->obj))
+	switch (pdf_field_type(doc, annot->obj))
 	{
 	case FZ_WIDGET_TYPE_LISTBOX:
 	case FZ_WIDGET_TYPE_COMBOBOX:
@@ -2843,4 +2847,31 @@ void pdf_choice_widget_set_value(pdf_document *doc, fz_widget *tw, int n, char *
 		pdf_drop_obj(opt);
 		fz_rethrow(ctx);
 	}
+}
+
+int pdf_signature_widget_byte_range(pdf_document *doc, fz_widget *widget, int (*byte_range)[2])
+{
+	pdf_annot *annot = (pdf_annot *)widget;
+	pdf_obj *br = pdf_dict_getp(annot->obj, "V/ByteRange");
+	int i, n = pdf_array_len(br)/2;
+
+	if (byte_range)
+	{
+		for (i = 0; i < n; i++)
+		{
+			byte_range[i][0] = pdf_to_int(pdf_array_get(br, 2*i));
+			byte_range[i][1] = pdf_to_int(pdf_array_get(br, 2*i+1));
+		}
+	}
+
+	return n;
+}
+
+int pdf_signature_widget_contents(pdf_document *doc, fz_widget *widget, char **contents)
+{
+	pdf_annot *annot = (pdf_annot *)widget;
+	pdf_obj *c = pdf_dict_getp(annot->obj, "V/Contents");
+	if (contents)
+		*contents = pdf_to_str_buf(c);
+	return pdf_to_str_len(c);
 }

@@ -1,7 +1,3 @@
-#include "fitz.h"
-#include "mupdf.h"
-#include "muxps.h"
-#include "mucbz.h"
 #include "pdfapp.h"
 
 #ifndef UNICODE
@@ -52,7 +48,7 @@ static char filename[PATH_MAX];
 	RegCreateKeyExA(parent, name, 0, 0, 0, KEY_WRITE, 0, &ptr, 0)
 
 #define SET_KEY(parent, name, value) \
-	RegSetValueExA(parent, name, 0, REG_SZ, value, strlen(value) + 1)
+	RegSetValueExA(parent, name, 0, REG_SZ, (const BYTE *)(value), strlen(value) + 1)
 
 void install_app(char *argv0)
 {
@@ -186,7 +182,7 @@ int winfilename(wchar_t *buf, int len)
 	ofn.nMaxFile = len;
 	ofn.lpstrInitialDir = NULL;
 	ofn.lpstrTitle = L"MuPDF: Open PDF file";
-	ofn.lpstrFilter = L"Documents (*.pdf;*.xps;*.cbz;*.zip)\0*.zip;*.cbz;*.xps;*.pdf\0PDF Files (*.pdf)\0*.pdf\0XPS Files (*.xps)\0*.xps\0CBZ Files (*.cbz;*.zip)\0*.zip;*.cbz\0All Files\0*\0\0";
+	ofn.lpstrFilter = L"Documents (*.pdf;*.xps;*.cbz;*.zip;*.png;*.jpg;*.tif)\0*.zip;*.cbz;*.xps;*.pdf;*.jpe;*.jpg;*.jpeg;*.jfif;*.tif;*.tiff\0PDF Files (*.pdf)\0*.pdf\0XPS Files (*.xps)\0*.xps\0CBZ Files (*.cbz;*.zip)\0*.zip;*.cbz\0Image Files (*.png;*.jpe;*.tif)\0*.png;*.jpg;*.jpe;*.jpeg;*.jfif;*.tif;*.tiff\0All Files\0*\0\0";
 	ofn.Flags = OFN_FILEMUSTEXIST|OFN_HIDEREADONLY;
 	return GetOpenFileNameW(&ofn);
 }
@@ -204,7 +200,7 @@ int wingetsavepath(pdfapp_t *app, char *buf, int len)
 	ofn.nMaxFile = PATH_MAX;
 	ofn.lpstrInitialDir = NULL;
 	ofn.lpstrTitle = L"MuPDF: Save PDF file";
-	ofn.lpstrFilter = L"Documents (*.pdf;*.xps;*.cbz;*.zip)\0*.zip;*.cbz;*.xps;*.pdf\0PDF Files (*.pdf)\0*.pdf\0XPS Files (*.xps)\0*.xps\0CBZ Files (*.cbz;*.zip)\0*.zip;*.cbz\0All Files\0*\0\0";
+	ofn.lpstrFilter = L"Documents (*.pdf;*.xps;*.cbz;*.zip;*.png;*.jpg;*.tif)\0*.zip;*.cbz;*.xps;*.pdf;*.jpe;*.jpg;*.jpeg;*.jfif;*.tif;*.tiff\0PDF Files (*.pdf)\0*.pdf\0XPS Files (*.xps)\0*.xps\0CBZ Files (*.cbz;*.zip)\0*.zip;*.cbz\0Image Files (*.png;*.jpe;*.tif)\0*.png;*.jpg;*.jpe;*.jpeg;*.jfif;*.tif;*.tiff\0All Files\0*\0\0";
 	ofn.Flags = OFN_HIDEREADONLY;
 	if (GetSaveFileName(&ofn))
 	{
@@ -254,6 +250,7 @@ void winreplacefile(char *source, char *target)
 
 static char pd_filename[256] = "The file is encrypted.";
 static char pd_password[256] = "";
+static wchar_t pd_passwordw[256] = {0};
 static char td_textinput[1024] = "";
 static int td_retry = 0;
 static int cd_nopts;
@@ -275,8 +272,9 @@ dlogpassproc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 		{
 		case 1:
 			pd_okay = 1;
-			GetDlgItemTextA(hwnd, 3, pd_password, sizeof pd_password);
+			GetDlgItemTextW(hwnd, 3, pd_passwordw, nelem(pd_passwordw));
 			EndDialog(hwnd, 1);
+			WideCharToMultiByte(CP_UTF8, 0, pd_passwordw, -1, pd_password, sizeof pd_password, NULL, NULL);
 			return TRUE;
 		case 2:
 			pd_okay = 0;
@@ -342,7 +340,7 @@ dlogchoiceproc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 		/* FIXME: handle multiple select */
 		if (*cd_nvals > 0)
 		{
-			item = SendMessageA(listbox, LB_FINDSTRINGEXACT, -1, (LPARAM)cd_vals[0]);
+			item = SendMessageA(listbox, LB_FINDSTRINGEXACT, (WPARAM)-1, (LPARAM)cd_vals[0]);
 			if (item != LB_ERR)
 				SendMessageA(listbox, LB_SETCURSEL, item, 0);
 		}
@@ -355,7 +353,7 @@ dlogchoiceproc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 			*cd_nvals = 0;
 			for (i = 0; i < cd_nopts; i++)
 			{
-				item = SendMessageA(listbox, LB_FINDSTRINGEXACT, -1, (LPARAM)cd_opts[i]);
+				item = SendMessageA(listbox, LB_FINDSTRINGEXACT, (WPARAM)-1, (LPARAM)cd_opts[i]);
 				sel = SendMessageA(listbox, LB_GETSEL, item, 0);
 				if (sel && sel != LB_ERR)
 					cd_vals[(*cd_nvals)++] = cd_opts[i];

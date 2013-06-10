@@ -253,7 +253,7 @@ fz_draw_fill_path(fz_device *devp, fz_path *path, int even_odd, const fz_matrix 
 	fz_colorspace *model = state->dest->colorspace;
 
 	if (model == NULL)
-		model = fz_device_gray;
+		model = fz_device_gray(dev->ctx);
 
 	fz_reset_gel(dev->gel, &state->scissor);
 	fz_flatten_fill_path(dev->gel, path, ctm, flatness);
@@ -303,7 +303,7 @@ fz_draw_stroke_path(fz_device *devp, fz_path *path, fz_stroke_state *stroke, con
 	fz_colorspace *model = state->dest->colorspace;
 
 	if (model == NULL)
-		model = fz_device_gray;
+		model = fz_device_gray(dev->ctx);
 
 	if (linewidth * expansion < 0.1f)
 		linewidth = 1 / expansion;
@@ -556,8 +556,8 @@ fz_draw_fill_text(fz_device *devp, fz_text *text, const fz_matrix *ctm,
 			}
 			else
 			{
-				fz_matrix tm = {glyph->w, 0.0, 0.0, glyph->h, x + glyph->x, y + glyph->y};
-				fz_paint_image(state->dest, &state->scissor, state->shape, glyph, &tm, alpha * 255);
+				fz_matrix mat = {glyph->w, 0.0, 0.0, glyph->h, x + glyph->x, y + glyph->y};
+				fz_paint_image(state->dest, &state->scissor, state->shape, glyph, &mat, alpha * 255);
 			}
 			fz_drop_pixmap(dev->ctx, glyph);
 		}
@@ -678,7 +678,7 @@ fz_draw_clip_text(fz_device *devp, fz_text *text, const fz_matrix *ctm, int accu
 		/* make the mask the exact size needed */
 		fz_rect rect;
 
-		fz_irect_from_rect(&bbox, fz_bound_text(dev->ctx, text, ctm, &rect));
+		fz_irect_from_rect(&bbox, fz_bound_text(dev->ctx, text, NULL, ctm, &rect));
 		fz_intersect_irect(&bbox, &state->scissor);
 	}
 	else
@@ -766,7 +766,7 @@ fz_draw_clip_text(fz_device *devp, fz_text *text, const fz_matrix *ctm, int accu
 						state[0].mask = NULL;
 						fz_try(ctx)
 						{
-							fz_draw_fill_path(devp, path, 0, &fz_identity, fz_device_gray, &white, 1);
+							fz_draw_fill_path(devp, path, 0, &fz_identity, fz_device_gray(ctx), &white, 1);
 						}
 						fz_always(ctx)
 						{
@@ -810,7 +810,7 @@ fz_draw_clip_stroke_text(fz_device *devp, fz_text *text, fz_stroke_state *stroke
 	fz_rect rect;
 
 	/* make the mask the exact size needed */
-	fz_irect_from_rect(&bbox, fz_bound_text(dev->ctx, text, ctm, &rect));
+	fz_irect_from_rect(&bbox, fz_bound_text(dev->ctx, text, stroke, ctm, &rect));
 	fz_intersect_irect(&bbox, &state->scissor);
 
 	fz_try(ctx)
@@ -881,7 +881,7 @@ fz_draw_clip_stroke_text(fz_device *devp, fz_text *text, fz_stroke_state *stroke
 						state[0].mask = NULL;
 						fz_try(ctx)
 						{
-							fz_draw_stroke_path(devp, path, stroke, &fz_identity, fz_device_gray, &white, 1);
+							fz_draw_stroke_path(devp, path, stroke, &fz_identity, fz_device_gray(ctx), &white, 1);
 						}
 						fz_always(ctx)
 						{
@@ -1107,7 +1107,7 @@ fz_draw_fill_image(fz_device *devp, fz_image *image, const fz_matrix *ctm, float
 			state = fz_knockout_begin(dev);
 
 		after = 0;
-		if (pixmap->colorspace == fz_device_gray)
+		if (pixmap->colorspace == fz_device_gray(ctx))
 			after = 1;
 
 		if (pixmap->colorspace != model && !after)
@@ -1137,8 +1137,8 @@ fz_draw_fill_image(fz_device *devp, fz_image *image, const fz_matrix *ctm, float
 
 		if (pixmap->colorspace != model)
 		{
-			if ((pixmap->colorspace == fz_device_gray && model == fz_device_rgb) ||
-				(pixmap->colorspace == fz_device_gray && model == fz_device_bgr))
+			if ((pixmap->colorspace == fz_device_gray(ctx) && model == fz_device_rgb(ctx)) ||
+				(pixmap->colorspace == fz_device_gray(ctx) && model == fz_device_bgr(ctx)))
 			{
 				/* We have special case rendering code for gray -> rgb/bgr */
 			}
@@ -1409,7 +1409,7 @@ fz_draw_begin_mask(fz_device *devp, const fz_rect *rect, int luminosity, fz_colo
 
 	fz_try(ctx)
 	{
-		state[1].dest = dest = fz_new_pixmap_with_bbox(dev->ctx, fz_device_gray, &bbox);
+		state[1].dest = dest = fz_new_pixmap_with_bbox(dev->ctx, fz_device_gray(ctx), &bbox);
 		if (state->shape)
 		{
 			/* FIXME: If we ever want to support AIS true, then
@@ -1425,8 +1425,8 @@ fz_draw_begin_mask(fz_device *devp, const fz_rect *rect, int luminosity, fz_colo
 		{
 			float bc;
 			if (!colorspace)
-				colorspace = fz_device_gray;
-			fz_convert_color(dev->ctx, fz_device_gray, &bc, colorspace, colorfv);
+				colorspace = fz_device_gray(ctx);
+			fz_convert_color(dev->ctx, fz_device_gray(ctx), &bc, colorspace, colorfv);
 			fz_clear_pixmap_with_value(dev->ctx, dest, bc * 255);
 			if (shape)
 				fz_clear_pixmap_with_value(dev->ctx, shape, 255);
@@ -1688,11 +1688,11 @@ fz_cmp_tile_key(void *k0_, void *k1_)
 
 #ifndef NDEBUG
 static void
-fz_debug_tile(void *key_)
+fz_debug_tile(FILE *out, void *key_)
 {
 	tile_key *key = (tile_key *)key_;
 
-	printf("(tile id=%x, ctm=%g %g %g %g) ", key->id, key->ctm[0], key->ctm[1], key->ctm[2], key->ctm[3]);
+	fprintf(out, "(tile id=%x, ctm=%g %g %g %g) ", key->id, key->ctm[0], key->ctm[1], key->ctm[2], key->ctm[3]);
 }
 #endif
 
@@ -1847,7 +1847,6 @@ fz_draw_end_tile(fz_device *devp)
 	tile_record *tile;
 	tile_key *key;
 
-
 	if (dev->top == 0)
 	{
 		fz_warn(ctx, "Unexpected end_tile");
@@ -1867,8 +1866,13 @@ fz_draw_end_tile(fz_device *devp)
 	fz_intersect_irect(&area, fz_irect_from_rect(&scissor, &scissor_tmp));
 
 	/* FIXME: area is a bbox, so FP not appropriate here */
-	x0 = floorf(area.x0 / xstep);
-	y0 = floorf(area.y0 / ystep);
+	/* In PDF files xstep/ystep can be smaller than view (the area of a
+	 * single tile) (see fts_15_1506.pdf for an example). This means that
+	 * we have to bias the left hand/bottom edge calculations by the
+	 * difference between the step and the width/height of the tile. */
+	/* state[0].scissor = view, transformed by ctm */
+	x0 = floorf((area.x0 + xstep - state[0].scissor.x1 + state[0].scissor.x0) / xstep);
+	y0 = floorf((area.y0 + ystep - state[0].scissor.y1 + state[0].scissor.y0) / ystep);
 	x1 = ceilf(area.x1 / xstep);
 	y1 = ceilf(area.y1 / ystep);
 
@@ -1961,7 +1965,6 @@ fz_draw_end_tile(fz_device *devp)
 	{
 		/* Do nothing */
 	}
-
 
 	fz_drop_pixmap(dev->ctx, state[1].dest);
 	fz_drop_pixmap(dev->ctx, state[1].shape);
@@ -2098,4 +2101,25 @@ fz_new_draw_device_type3(fz_context *ctx, fz_pixmap *dest)
 	fz_draw_device *ddev = dev->user;
 	ddev->flags |= FZ_DRAWDEV_FLAGS_TYPE3;
 	return dev;
+}
+
+fz_irect *
+fz_bound_path_accurate(fz_context *ctx, fz_irect *bbox, const fz_irect *scissor, fz_path *path, const fz_stroke_state *stroke, const fz_matrix *ctm, float flatness, float linewidth)
+{
+	fz_gel *gel = fz_new_gel(ctx);
+
+	fz_reset_gel(gel, scissor);
+	if (stroke)
+	{
+		if (stroke->dash_len > 0)
+			fz_flatten_dash_path(gel, path, stroke, ctm, flatness, linewidth);
+		else
+			fz_flatten_stroke_path(gel, path, stroke, ctm, flatness, linewidth);
+	}
+	else
+		fz_flatten_fill_path(gel, path, ctm, flatness);
+	fz_bound_gel(gel, bbox);
+	fz_free_gel(gel);
+
+	return bbox;
 }

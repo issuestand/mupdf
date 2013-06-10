@@ -16,10 +16,9 @@ import android.widget.Adapter;
 import android.widget.AdapterView;
 import android.widget.Scroller;
 
-public class ReaderView extends AdapterView<Adapter>
-                        implements GestureDetector.OnGestureListener,
-                                   ScaleGestureDetector.OnScaleGestureListener,
-                                   Runnable {
+public class ReaderView
+		extends AdapterView<Adapter>
+		implements GestureDetector.OnGestureListener, ScaleGestureDetector.OnScaleGestureListener, Runnable {
 	private static final int  MOVING_DIAGONALLY = 0;
 	private static final int  MOVING_LEFT       = 1;
 	private static final int  MOVING_RIGHT      = 2;
@@ -483,10 +482,10 @@ public class ReaderView extends AdapterView<Adapter>
 		if (!mScaling)
 			mGestureDetector.onTouchEvent(event);
 
-		if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
+		if ((event.getAction() & event.ACTION_MASK) == MotionEvent.ACTION_DOWN) {
 			mUserInteracting = true;
 		}
-		if (event.getActionMasked() == MotionEvent.ACTION_UP) {
+		if ((event.getAction() & event.ACTION_MASK) == MotionEvent.ACTION_UP) {
 			mScrollDisabled = false;
 			mUserInteracting = false;
 
@@ -658,7 +657,7 @@ public class ReaderView extends AdapterView<Adapter>
 
 	@Override
 	public View getSelectedView() {
-		throw new UnsupportedOperationException("Not supported");
+		throw new UnsupportedOperationException(getContext().getString(R.string.not_supported));
 	}
 
 	@Override
@@ -671,7 +670,7 @@ public class ReaderView extends AdapterView<Adapter>
 
 	@Override
 	public void setSelection(int arg0) {
-		throw new UnsupportedOperationException("Not supported");
+		throw new UnsupportedOperationException(getContext().getString(R.string.not_supported));
 	}
 
 	private View getCached() {

@@ -1,304 +1,156 @@
 #include "fitz-internal.h"
 
-/*
- * polygon clipping
- */
-
-enum { IN, OUT, ENTER, LEAVE };
-enum { MAXV = 3 + 4 };
 enum { MAXN = 2 + FZ_MAX_COLORS };
 
-static int clipx(float val, int ismax, float *v1, float *v2, int n)
+static void paint_scan(fz_pixmap *restrict pix, int y, int fx0, int fx1, int cx0, int cx1, const int *restrict v0, const int *restrict v1, int n)
 {
-	float t;
-	int i;
-	int v1o = ismax ? v1[0] > val : v1[0] < val;
-	int v2o = ismax ? v2[0] > val : v2[0] < val;
-	if (v1o + v2o == 0)
-		return IN;
-	if (v1o + v2o == 2)
-		return OUT;
-	if (v2o)
+	unsigned char *p;
+	int c[MAXN], dc[MAXN];
+	int k, w;
+	float div, mul;
+	int x0, x1;
+
+	/* Ensure that fx0 is left edge, and fx1 is right */
+	if (fx0 > fx1)
 	{
-		t = (val - v1[0]) / (v2[0] - v1[0]);
-		v2[0] = val;
-		v2[1] = v1[1] + t * (v2[1] - v1[1]);
-		for (i = 2; i < n; i++)
-			v2[i] = v1[i] + t * (v2[i] - v1[i]);
-		return LEAVE;
+		const int *v;
+		int t = fx0; fx0 = fx1; fx1 = t;
+		v = v0; v0 = v1; v1 = v;
 	}
-	else
-	{
-		t = (val - v2[0]) / (v1[0] - v2[0]);
-		v1[0] = val;
-		v1[1] = v2[1] + t * (v1[1] - v2[1]);
-		for (i = 2; i < n; i++)
-			v1[i] = v2[i] + t * (v1[i] - v2[i]);
-		return ENTER;
-	}
-}
+	else if (fx0 == fx1)
+		return;
 
-static int clipy(float val, int ismax, float *v1, float *v2, int n)
-{
-	float t;
-	int i;
-	int v1o = ismax ? v1[1] > val : v1[1] < val;
-	int v2o = ismax ? v2[1] > val : v2[1] < val;
-	if (v1o + v2o == 0)
-		return IN;
-	if (v1o + v2o == 2)
-		return OUT;
-	if (v2o)
-	{
-		t = (val - v1[1]) / (v2[1] - v1[1]);
-		v2[0] = v1[0] + t * (v2[0] - v1[0]);
-		v2[1] = val;
-		for (i = 2; i < n; i++)
-			v2[i] = v1[i] + t * (v2[i] - v1[i]);
-		return LEAVE;
-	}
-	else
-	{
-		t = (val - v2[1]) / (v1[1] - v2[1]);
-		v1[0] = v2[0] + t * (v1[0] - v2[0]);
-		v1[1] = val;
-		for (i = 2; i < n; i++)
-			v1[i] = v2[i] + t * (v1[i] - v2[i]);
-		return ENTER;
-	}
-}
+	/* Clip fx0, fx1 to range */
+	if (fx0 >= cx1)
+		return;
+	if (fx1 <= cx0)
+		return;
+	x0 = (fx0 > cx0 ? fx0 : cx0);
+	x1 = (fx1 < cx1 ? fx1 : cx1);
 
-static inline void copy_vert(float *dst, float *src, int n)
-{
-	while (n--)
-		*dst++ = *src++;
-}
-
-static int clip_poly(float src[MAXV][MAXN],
-	float dst[MAXV][MAXN], int len, int n,
-	float val, int isy, int ismax)
-{
-	float cv1[MAXN];
-	float cv2[MAXN];
-	int v1, v2, cp;
-	int r;
-
-	v1 = len - 1;
-	cp = 0;
-
-	for (v2 = 0; v2 < len; v2++)
-	{
-		copy_vert(cv1, src[v1], n);
-		copy_vert(cv2, src[v2], n);
-
-		if (isy)
-			r = clipy(val, ismax, cv1, cv2, n);
-		else
-			r = clipx(val, ismax, cv1, cv2, n);
-
-		switch (r)
-		{
-		case IN:
-			copy_vert(dst[cp++], cv2, n);
-			break;
-		case OUT:
-			break;
-		case LEAVE:
-			copy_vert(dst[cp++], cv2, n);
-			break;
-		case ENTER:
-			copy_vert(dst[cp++], cv1, n);
-			copy_vert(dst[cp++], cv2, n);
-			break;
-		}
-		v1 = v2;
-	}
-
-	return cp;
-}
-
-/*
- * gouraud shaded polygon scan conversion
- */
-
-static void paint_scan(fz_pixmap *pix, int y, int x1, int x2, int *v1, int *v2, int n)
-{
-	unsigned char *p = pix->samples + (unsigned int)(((y - pix->y) * pix->w + (x1 - pix->x)) * pix->n);
-	int v[FZ_MAX_COLORS];
-	int dv[FZ_MAX_COLORS];
-	int w = x2 - x1;
-	int k;
-
-	assert(w >= 0);
-	assert(y >= pix->y);
-	assert(y < pix->y + pix->h);
-	assert(x1 >= pix->x);
-	assert(x2 <= pix->x + pix->w);
-
+	w = x1 - x0;
 	if (w == 0)
 		return;
 
+	div = 1.0f / (fx1 - fx0);
+	mul = (x0 - fx0);
 	for (k = 0; k < n; k++)
 	{
-		v[k] = v1[k];
-		dv[k] = (v2[k] - v1[k]) / w;
+		dc[k] = (v1[k] - v0[k]) * div;
+		c[k] = v0[k] + dc[k] * mul;
 	}
 
+	p = pix->samples + ((x0 - pix->x) + (y - pix->y) * pix->w) * pix->n;
 	while (w--)
 	{
 		for (k = 0; k < n; k++)
 		{
-			*p++ = v[k] >> 16;
-			v[k] += dv[k];
+			*p++ = c[k]>>16;
+			c[k] += dc[k];
 		}
 		*p++ = 255;
 	}
 }
 
-static int find_next(int gel[MAXV][MAXN], int len, int a, int *s, int *e, int d)
+typedef struct edge_data_s edge_data;
+
+struct edge_data_s
 {
-	int b;
+	float x;
+	float dx;
+	int v[2*MAXN];
+};
 
-	while (1)
+static inline void prepare_edge(const float *restrict vtop, const float *restrict vbot, edge_data *restrict edge, float y, int n)
+{
+	float r = 1.0f / (vbot[1] - vtop[1]);
+	float t = (y - vtop[1]) * r;
+	float diff = vbot[0] - vtop[0];
+	int i;
+
+	edge->x = vtop[0] + diff * t;
+	edge->dx = diff * r;
+
+	for (i = 0; i < n; i++)
 	{
-		b = a + d;
-		if (b == len)
-			b = 0;
-		if (b == -1)
-			b = len - 1;
-
-		if (gel[b][1] == gel[a][1])
-		{
-			a = b;
-			continue;
-		}
-
-		if (gel[b][1] > gel[a][1])
-		{
-			*s = a;
-			*e = b;
-			return 0;
-		}
-
-		return 1;
+		diff = vbot[i+2] - vtop[i+2];
+		edge->v[i] = (int)(65536.0f * (vtop[i+2] + diff * t));
+		edge->v[i+MAXN] = (int)(65536.0f * diff * r);
 	}
 }
 
-static void load_edge(int gel[MAXV][MAXN], int s, int e, int *ael, int *del, int n)
+static inline void step_edge(edge_data *edge, int n)
 {
-	int swp, k, dy;
+	int i;
 
-	if (gel[s][1] > gel[e][1])
+	edge->x += edge->dx;
+
+	for (i = 0; i < n; i++)
 	{
-		swp = s; s = e; e = swp;
+		edge->v[i] += edge->v[i + MAXN];
 	}
-
-	dy = gel[e][1] - gel[s][1];
-
-	ael[0] = gel[s][0];
-	del[0] = (gel[e][0] - gel[s][0]) / dy;
-	for (k = 2; k < n; k++)
-	{
-		ael[k] = gel[s][k];
-		del[k] = (gel[e][k] - gel[s][k]) / dy;
-	}
-}
-
-static inline void step_edge(int *ael, int *del, int n)
-{
-	int k;
-	ael[0] += del[0];
-	for (k = 2; k < n; k++)
-		ael[k] += del[k];
 }
 
 static void
-fz_paint_triangle(fz_pixmap *pix, float *av, float *bv, float *cv, int n, const fz_irect *bbox)
+fz_paint_triangle(fz_pixmap *pix, float v[3][MAXN], int n, const fz_irect *bbox)
 {
-	float poly[MAXV][MAXN];
-	float temp[MAXV][MAXN];
-	float cx0 = bbox->x0;
-	float cy0 = bbox->y0;
-	float cx1 = bbox->x1;
-	float cy1 = bbox->y1;
-
-	int gel[MAXV][MAXN];
-	int ael[2][MAXN];
-	int del[2][MAXN];
-	int y, s0, s1, e0, e1;
-	int top, bot, len;
-
-	int i, k;
-
-	copy_vert(poly[0], av, n);
-	copy_vert(poly[1], bv, n);
-	copy_vert(poly[2], cv, n);
-
-	len = clip_poly(poly, temp, 3, n, cx0, 0, 0);
-	len = clip_poly(temp, poly, len, n, cx1, 0, 1);
-	len = clip_poly(poly, temp, len, n, cy0, 1, 0);
-	len = clip_poly(temp, poly, len, n, cy1, 1, 1);
-
-	if (len < 3)
-		return;
-
-	for (i = 0; i < len; i++)
-	{
-		gel[i][0] = floorf(poly[i][0] + 0.5f) * 65536; /* trunc and fix */
-		gel[i][1] = floorf(poly[i][1] + 0.5f); /* y is not fixpoint */
-		for (k = 2; k < n; k++)
-			gel[i][k] = poly[i][k] * 65536; /* fix with precision */
-	}
+	edge_data e0, e1;
+	int top, mid, bot;
+	float y, y1;
+	int minx, maxx;
 
 	top = bot = 0;
-	for (i = 0; i < len; i++)
+	if (v[1][1] < v[0][1]) top = 1; else bot = 1;
+	if (v[2][1] < v[top][1]) top = 2;
+	else if (v[2][1] > v[bot][1]) bot = 2;
+	if (v[top][1] == v[bot][1]) return;
+
+	/* Test if the triangle is completely outside the scissor rect */
+	if (v[bot][1] < bbox->y0) return;
+	if (v[top][1] > bbox->y1) return;
+
+	/* Magic! Ensure that mid/top/bot are all different */
+	mid = 3^top^bot;
+
+	assert(top != bot && top != mid && mid != bot);
+
+	minx = fz_maxi(bbox->x0, pix->x);
+	maxx = fz_mini(bbox->x1, pix->x + pix->w);
+
+	y = ceilf(fz_max(bbox->y0, v[top][1]));
+	y1 = ceilf(fz_min(bbox->y1, v[mid][1]));
+
+	n -= 2;
+	prepare_edge(v[top], v[bot], &e0, y, n);
+	if (y < y1)
 	{
-		if (gel[i][1] < gel[top][1])
-			top = i;
-		if (gel[i][1] > gel[bot][1])
-			bot = i;
+		prepare_edge(v[top], v[mid], &e1, y, n);
+
+		do
+		{
+			paint_scan(pix, y, (int)e0.x, (int)e1.x, minx, maxx, &e0.v[0], &e1.v[0], n);
+			step_edge(&e0, n);
+			step_edge(&e1, n);
+			y ++;
+		}
+		while (y < y1);
 	}
 
-	if (gel[bot][1] - gel[top][1] == 0)
-		return;
-
-	y = gel[top][1];
-
-	if (find_next(gel, len, top, &s0, &e0, 1))
-		return;
-	if (find_next(gel, len, top, &s1, &e1, -1))
-		return;
-
-	load_edge(gel, s0, e0, ael[0], del[0], n);
-	load_edge(gel, s1, e1, ael[1], del[1], n);
-
-	while (1)
+	y1 = ceilf(fz_min(bbox->y1, v[bot][1]));
+	if (y < y1)
 	{
-		int x0 = ael[0][0] >> 16;
-		int x1 = ael[1][0] >> 16;
+		prepare_edge(v[mid], v[bot], &e1, y, n);
 
-		if (ael[0][0] < ael[1][0])
-			paint_scan(pix, y, x0, x1, ael[0]+2, ael[1]+2, n-2);
-		else
-			paint_scan(pix, y, x1, x0, ael[1]+2, ael[0]+2, n-2);
-
-		step_edge(ael[0], del[0], n);
-		step_edge(ael[1], del[1], n);
-		y ++;
-
-		if (y >= gel[e0][1])
+		do
 		{
-			if (find_next(gel, len, e0, &s0, &e0, 1))
-				return;
-			load_edge(gel, s0, e0, ael[0], del[0], n);
+			paint_scan(pix, y, (int)e0.x, (int)e1.x, minx, maxx, &e0.v[0], &e1.v[0], n);
+			y ++;
+			if (y >= y1)
+				break;
+			step_edge(&e0, n);
+			step_edge(&e1, n);
 		}
-
-		if (y >= gel[e1][1])
-		{
-			if (find_next(gel, len, e1, &s1, &e1, -1))
-				return;
-			load_edge(gel, s1, e1, ael[1], del[1], n);
-		}
+		while (1);
 	}
 }
 
@@ -345,7 +197,7 @@ do_paint_tri(void *arg, fz_vertex *av, fz_vertex *bv, fz_vertex *cv)
 				ltri[i + 2] *= 255;
 		}
 	}
-	fz_paint_triangle(dest, local[0], local[1], local[2], 2 + dest->colorspace->n, ptd->bbox);
+	fz_paint_triangle(dest, local, 2 + dest->colorspace->n, ptd->bbox);
 }
 
 void
@@ -369,7 +221,7 @@ fz_paint_shade(fz_context *ctx, fz_shade *shade, const fz_matrix *ctm, fz_pixmap
 		if (shade->use_function)
 		{
 			fz_color_converter cc;
-			fz_find_color_converter(&cc, ctx, dest->colorspace, shade->colorspace);
+			fz_lookup_color_converter(&cc, ctx, dest->colorspace, shade->colorspace);
 			for (i = 0; i < 256; i++)
 			{
 				cc.convert(&cc, color, shade->function[i]);
@@ -378,7 +230,7 @@ fz_paint_shade(fz_context *ctx, fz_shade *shade, const fz_matrix *ctm, fz_pixmap
 				clut[i][k] = shade->function[i][shade->colorspace->n] * 255;
 			}
 			conv = fz_new_pixmap_with_bbox(ctx, dest->colorspace, bbox);
-			temp = fz_new_pixmap_with_bbox(ctx, fz_device_gray, bbox);
+			temp = fz_new_pixmap_with_bbox(ctx, fz_device_gray(ctx), bbox);
 			fz_clear_pixmap(ctx, temp);
 		}
 		else

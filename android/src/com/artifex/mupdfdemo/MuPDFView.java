@@ -15,11 +15,15 @@ public interface MuPDFView {
 	public void selectText(float x0, float y0, float x1, float y1);
 	public void deselectText();
 	public boolean copySelection();
-	public void markupSelection(Annotation.Type type);
+	public boolean markupSelection(Annotation.Type type);
 	public void deleteSelectedAnnotation();
 	public void setSearchBoxes(RectF searchBoxes[]);
 	public void setLinkHighlighting(boolean f);
 	public void deselectAnnotation();
+	public void startDraw(float x, float y);
+	public void continueDraw(float x, float y);
+	public void cancelDraw();
+	public boolean saveDraw();
 	public void setChangeReporter(Runnable reporter);
 	public void update();
 	public void addHq(boolean update);

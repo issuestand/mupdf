@@ -4,10 +4,6 @@ include $(CLEAR_VARS)
 
 MY_ROOT := ../..
 
-OPENJPEG := openjpeg
-JPEG := jpeg
-ZLIB := zlib
-FREETYPE := freetype
 V8 := v8-3.9
 
 ifeq ($(TARGET_ARCH_ABI),x86)
@@ -22,18 +18,22 @@ NDK_APP_CFLAGS :=
 endif
 endif
 LOCAL_CFLAGS += -DAA_BITS=8
+ifdef MEMENTO
+LOCAL_CFLAGS += -DMEMENTO -DMEMENTO_LEAKONLY
+endif
 
 LOCAL_C_INCLUDES := \
 	../thirdparty/jbig2dec \
-	../thirdparty/$(OPENJPEG)/libopenjpeg \
-	../thirdparty/$(JPEG) \
-	../thirdparty/$(ZLIB) \
-	../thirdparty/$(FREETYPE)/include \
+	../thirdparty/openjpeg/src/lib/openjp2 \
+	../thirdparty/jpeg \
+	../thirdparty/zlib \
+	../thirdparty/freetype/include \
 	../draw \
 	../fitz \
 	../pdf \
 	../xps \
 	../cbz \
+	../ucdn \
 	../scripts \
 	..
 ifdef V8_BUILD

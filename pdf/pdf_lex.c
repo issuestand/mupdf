@@ -88,7 +88,7 @@ lex_number(fz_stream *f, pdf_lexbuf *buf, int c)
 
 	while (1)
 	{
-		int c = fz_read_byte(f);
+		c = fz_read_byte(f);
 		switch (c)
 		{
 		case '.':
@@ -114,7 +114,7 @@ loop_after_dot:
 	d = 1;
 	while (1)
 	{
-		int c = fz_read_byte(f);
+		c = fz_read_byte(f);
 		switch (c)
 		{
 		case RANGE_0_9:
@@ -139,7 +139,7 @@ underflow:
 	/* Ignore any digits after here, because they are too small */
 	while (1)
 	{
-		int c = fz_read_byte(f);
+		c = fz_read_byte(f);
 		switch (c)
 		{
 		case RANGE_0_9:
@@ -364,7 +364,7 @@ lex_hex_string(fz_stream *f, pdf_lexbuf *lb)
 		case EOF:
 			goto end;
 		default:
-			fz_warn(f->ctx, "ignoring invalid character in hex string: '%c'", c);
+			fz_warn(f->ctx, "ignoring invalid character in hex string");
 		}
 	}
 end:
@@ -372,7 +372,7 @@ end:
 	return PDF_TOK_STRING;
 }
 
-static int
+static pdf_token
 pdf_token_from_keyword(char *key)
 {
 	switch (*key)
@@ -442,7 +442,7 @@ ptrdiff_t pdf_lexbuf_grow(pdf_lexbuf *lb)
 	return lb->scratch - old;
 }
 
-int
+pdf_token
 pdf_lex(fz_stream *f, pdf_lexbuf *buf)
 {
 	while (1)
@@ -505,7 +505,7 @@ pdf_lex(fz_stream *f, pdf_lexbuf *buf)
 
 void pdf_print_token(fz_context *ctx, fz_buffer *fzbuf, int tok, pdf_lexbuf *buf)
 {
-	switch(tok)
+	switch (tok)
 	{
 	case PDF_TOK_NAME:
 		fz_buffer_printf(ctx, fzbuf, "/%s", buf->scratch);

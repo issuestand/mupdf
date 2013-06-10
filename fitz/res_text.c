@@ -53,7 +53,7 @@ fz_clone_text(fz_context *ctx, fz_text *old)
 }
 
 fz_rect *
-fz_bound_text(fz_context *ctx, fz_text *text, const fz_matrix *ctm, fz_rect *bbox)
+fz_bound_text(fz_context *ctx, fz_text *text, const fz_stroke_state *stroke, const fz_matrix *ctm, fz_rect *bbox)
 {
 	fz_matrix tm, trm;
 	fz_rect gbox;
@@ -89,6 +89,9 @@ fz_bound_text(fz_context *ctx, fz_text *text, const fz_matrix *ctm, fz_rect *bbo
 			bbox->y1 = fz_max(bbox->y1, gbox.y1);
 		}
 	}
+
+	if (stroke)
+		fz_adjust_rect_for_stroke(bbox, stroke, ctm);
 
 	/* Compensate for the glyph cache limited positioning precision */
 	bbox->x0 -= 1;

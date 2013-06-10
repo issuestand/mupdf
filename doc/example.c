@@ -5,7 +5,7 @@
 // gcc -g -o build/debug/example -I fitz doc/example.c \
 //	build/debug/libfitz.a build/debug/libfreetype.a \
 //	build/debug/libopenjpeg.a build/debug/libjbig2dec.a \
-//	build/debug/libjpeg.a -lpng -lm
+//	build/debug/libjpeg.a -lm
 //
 // build/debug/example /path/to/document.pdf 1 200 25
 
@@ -54,7 +54,7 @@ render(char *filename, int pagenumber, int zoom, int rotation)
 
 	fz_irect bbox;
 	fz_round_rect(&bbox, &bounds);
-	fz_pixmap *pix = fz_new_pixmap_with_bbox(ctx, fz_device_rgb, &bbox);
+	fz_pixmap *pix = fz_new_pixmap_with_bbox(ctx, fz_device_rgb(ctx), &bbox);
 	fz_clear_pixmap_with_value(ctx, pix, 0xff);
 
 	// A page consists of a series of objects (text, line art, images,

@@ -314,7 +314,7 @@ fz_list_fill_text(fz_device *dev, fz_text *text, const fz_matrix *ctm,
 	node = fz_new_display_node(ctx, FZ_CMD_FILL_TEXT, ctm, colorspace, color, alpha);
 	fz_try(ctx)
 	{
-		fz_bound_text(dev->ctx, text, ctm, &node->rect);
+		fz_bound_text(dev->ctx, text, NULL, ctm, &node->rect);
 		node->item.text = fz_clone_text(dev->ctx, text);
 	}
 	fz_catch(ctx)
@@ -335,8 +335,7 @@ fz_list_stroke_text(fz_device *dev, fz_text *text, fz_stroke_state *stroke, cons
 	node->item.text = NULL;
 	fz_try(ctx)
 	{
-		fz_bound_text(dev->ctx, text, ctm, &node->rect);
-		fz_adjust_rect_for_stroke(&node->rect, stroke, ctm);
+		fz_bound_text(dev->ctx, text, stroke, ctm, &node->rect);
 		node->item.text = fz_clone_text(dev->ctx, text);
 		node->stroke = fz_keep_stroke_state(dev->ctx, stroke);
 	}
@@ -356,7 +355,7 @@ fz_list_clip_text(fz_device *dev, fz_text *text, const fz_matrix *ctm, int accum
 	node = fz_new_display_node(ctx, FZ_CMD_CLIP_TEXT, ctm, NULL, NULL, 0);
 	fz_try(ctx)
 	{
-		fz_bound_text(dev->ctx, text, ctm, &node->rect);
+		fz_bound_text(dev->ctx, text, NULL, ctm, &node->rect);
 		node->item.text = fz_clone_text(dev->ctx, text);
 		node->flag = accumulate;
 		/* when accumulating, be conservative about culling */
@@ -379,8 +378,7 @@ fz_list_clip_stroke_text(fz_device *dev, fz_text *text, fz_stroke_state *stroke,
 	node = fz_new_display_node(ctx, FZ_CMD_CLIP_STROKE_TEXT, ctm, NULL, NULL, 0);
 	fz_try(ctx)
 	{
-		fz_bound_text(dev->ctx, text, ctm, &node->rect);
-		fz_adjust_rect_for_stroke(&node->rect, stroke, ctm);
+		fz_bound_text(dev->ctx, text, stroke, ctm, &node->rect);
 		node->item.text = fz_clone_text(dev->ctx, text);
 		node->stroke = fz_keep_stroke_state(dev->ctx, stroke);
 	}
@@ -400,7 +398,7 @@ fz_list_ignore_text(fz_device *dev, fz_text *text, const fz_matrix *ctm)
 	node = fz_new_display_node(ctx, FZ_CMD_IGNORE_TEXT, ctm, NULL, NULL, 0);
 	fz_try(ctx)
 	{
-		fz_bound_text(dev->ctx, text, ctm, &node->rect);
+		fz_bound_text(dev->ctx, text, NULL, ctm, &node->rect);
 		node->item.text = fz_clone_text(dev->ctx, text);
 	}
 	fz_catch(ctx)
@@ -744,20 +742,26 @@ visible:
 				fz_ignore_text(dev, node->item.text, &ctm);
 				break;
 			case FZ_CMD_FILL_SHADE:
-				fz_fill_shade(dev, node->item.shade, &ctm, node->alpha);
+				if ((dev->hints & FZ_IGNORE_SHADE) == 0)
+					fz_fill_shade(dev, node->item.shade, &ctm, node->alpha);
 				break;
 			case FZ_CMD_FILL_IMAGE:
-				fz_fill_image(dev, node->item.image, &ctm, node->alpha);
+				if ((dev->hints & FZ_IGNORE_IMAGE) == 0)
+					fz_fill_image(dev, node->item.image, &ctm, node->alpha);
 				break;
 			case FZ_CMD_FILL_IMAGE_MASK:
-				fz_fill_image_mask(dev, node->item.image, &ctm,
-					node->colorspace, node->color, node->alpha);
+				if ((dev->hints & FZ_IGNORE_IMAGE) == 0)
+					fz_fill_image_mask(dev, node->item.image, &ctm,
+						node->colorspace, node->color, node->alpha);
 				break;
 			case FZ_CMD_CLIP_IMAGE_MASK:
 			{
-				fz_rect rect = node->rect;
-				fz_transform_rect(&rect, top_ctm);
-				fz_clip_image_mask(dev, node->item.image, &rect, &ctm);
+				if ((dev->hints & FZ_IGNORE_IMAGE) == 0)
+				{
+					fz_rect rect = node->rect;
+					fz_transform_rect(&rect, top_ctm);
+					fz_clip_image_mask(dev, node->item.image, &rect, &ctm);
+				}
 				break;
 			}
 			case FZ_CMD_POP_CLIP:

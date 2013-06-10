@@ -29,7 +29,7 @@ endif
 
 LOCAL_LDLIBS    := -lm -llog -ljnigraphics
 ifdef V8_BUILD
-LOCAL_LDLIBS	+= -L$(MUPDF_ROOT)/thirdparty/v8-3.9/android -lv8_base -lv8_snapshot
+LOCAL_LDLIBS	+= -L$(MUPDF_ROOT)/thirdparty/v8-3.9/android -lv8_$(TARGET_ARCH_ABI)
 endif
 
 include $(BUILD_SHARED_LIBRARY)

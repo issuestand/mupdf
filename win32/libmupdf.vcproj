@@ -40,7 +40,7 @@
 			<Tool
 				Name="VCCLCompilerTool"
 				Optimization="0"
-				AdditionalIncludeDirectories="..\scripts;..\fitz;..\pdf;..\thirdparty\jbig2dec;..\thirdparty\jpeg;..\thirdparty\openjpeg\libopenjpeg;..\thirdparty\zlib;..\thirdparty\freetype\include"
+				AdditionalIncludeDirectories="..\scripts;..\fitz;..\ucdn;..\pdf;..\thirdparty\jbig2dec;..\thirdparty\jpeg;..\thirdparty\openjpeg\src\lib\openjp2;..\thirdparty\zlib;..\thirdparty\freetype\include"
 				PreprocessorDefinitions="DEBUG=1"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
@@ -105,7 +105,7 @@
 				Name="VCCLCompilerTool"
 				Optimization="2"
 				EnableIntrinsicFunctions="true"
-				AdditionalIncludeDirectories="..\scripts;..\fitz;..\pdf;..\thirdparty\jbig2dec;..\thirdparty\jpeg;..\thirdparty\openjpeg\libopenjpeg;..\thirdparty\zlib;..\thirdparty\freetype\include"
+				AdditionalIncludeDirectories="..\scripts;..\fitz;..\ucdn;..\pdf;..\thirdparty\jbig2dec;..\thirdparty\jpeg;..\thirdparty\openjpeg\src\lib\openjp2;..\thirdparty\zlib;..\thirdparty\freetype\include"
 				RuntimeLibrary="0"
 				EnableFunctionLevelLinking="true"
 				WarningLevel="3"
@@ -165,7 +165,7 @@
 			<Tool
 				Name="VCCLCompilerTool"
 				Optimization="0"
-				AdditionalIncludeDirectories="..\scripts;..\fitz;..\pdf;..\thirdparty\jbig2dec;..\thirdparty\jpeg;..\thirdparty\openjpeg\libopenjpeg;..\thirdparty\zlib;..\thirdparty\freetype\include"
+				AdditionalIncludeDirectories="..\scripts;..\fitz;..\ucdn;..\pdf;..\thirdparty\jbig2dec;..\thirdparty\jpeg;..\thirdparty\openjpeg\src\lib\openjp2;..\thirdparty\zlib;..\thirdparty\freetype\include"
 				PreprocessorDefinitions="MEMENTO=1;DEBUG=1"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
@@ -437,7 +437,7 @@
 				>
 			</File>
 			<File
-				RelativePath="..\fitz\dev_text.c"
+				RelativePath="..\fitz\dev_svg.c"
 				>
 			</File>
 			<File
@@ -458,10 +458,6 @@
 			</File>
 			<File
 				RelativePath="..\fitz\doc_outline.c"
-				>
-			</File>
-			<File
-				RelativePath="..\fitz\doc_search.c"
 				>
 			</File>
 			<File
@@ -545,7 +541,15 @@
 				>
 			</File>
 			<File
+				RelativePath="..\fitz\res_func.c"
+				>
+			</File>
+			<File
 				RelativePath="..\fitz\res_halftone.c"
+				>
+			</File>
+			<File
+				RelativePath="..\fitz\res_image.c"
 				>
 			</File>
 			<File
@@ -553,7 +557,15 @@
 				>
 			</File>
 			<File
+				RelativePath="..\fitz\res_pcl.c"
+				>
+			</File>
+			<File
 				RelativePath="..\fitz\res_pixmap.c"
+				>
+			</File>
+			<File
+				RelativePath="..\fitz\res_pwg.c"
 				>
 			</File>
 			<File
@@ -586,6 +598,22 @@
 			</File>
 			<File
 				RelativePath="..\fitz\stm_read.c"
+				>
+			</File>
+			<File
+				RelativePath="..\fitz\text_extract.c"
+				>
+			</File>
+			<File
+				RelativePath="..\fitz\text_output.c"
+				>
+			</File>
+			<File
+				RelativePath="..\fitz\text_paragraph.c"
+				>
+			</File>
+			<File
+				RelativePath="..\fitz\text_search.c"
 				>
 			</File>
 		</Filter>
@@ -630,6 +658,14 @@
 			</File>
 			<File
 				RelativePath="..\draw\draw_unpack.c"
+				>
+			</File>
+		</Filter>
+		<Filter
+			Name="ucdn"
+			>
+			<File
+				RelativePath="..\ucdn\ucdn.c"
 				>
 			</File>
 		</Filter>
@@ -698,6 +734,18 @@
 			</File>
 			<File
 				RelativePath="..\cbz\mucbz.h"
+				>
+			</File>
+		</Filter>
+		<Filter
+			Name="image"
+			>
+			<File
+				RelativePath="..\image\muimage.c"
+				>
+			</File>
+			<File
+				RelativePath="..\image\muimage.h"
 				>
 			</File>
 		</Filter>

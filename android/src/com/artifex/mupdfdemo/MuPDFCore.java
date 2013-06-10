@@ -1,6 +1,7 @@
 package com.artifex.mupdfdemo;
 import java.util.ArrayList;
 
+import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Bitmap.Config;
 import android.graphics.PointF;
@@ -19,10 +20,12 @@ public class MuPDFCore
 	private float pageHeight;
 	private long globals;
 	private byte fileBuffer[];
+	private String file_format;
 
 	/* The native functions */
 	private native long openFile(String filename);
 	private native long openBuffer();
+	private native String fileFormatInternal();
 	private native int countPagesInternal();
 	private native void gotoPageInternal(int localActionPageNum);
 	private native float getPageWidth();
@@ -40,6 +43,7 @@ public class MuPDFCore
 	private native TextChar[][][][] text();
 	private native byte[] textAsHtml();
 	private native void addMarkupAnnotationInternal(PointF[] quadPoints, int type);
+	private native void addInkAnnotationInternal(PointF[][] arcs);
 	private native void deleteAnnotationInternal(int annot_index);
 	private native int passClickEventInternal(int page, float x, float y);
 	private native void setFocusedWidgetChoiceSelectedInternal(String [] selected);
@@ -65,23 +69,25 @@ public class MuPDFCore
 
 	public static native boolean javascriptSupported();
 
-	public MuPDFCore(String filename) throws Exception
+	public MuPDFCore(Context context, String filename) throws Exception
 	{
 		globals = openFile(filename);
 		if (globals == 0)
 		{
-			throw new Exception("Failed to open "+filename);
+			throw new Exception(String.format(context.getString(R.string.cannot_open_file_Path), filename));
 		}
+		file_format = fileFormatInternal();
 	}
 
-	public MuPDFCore(byte buffer[]) throws Exception
+	public MuPDFCore(Context context, byte buffer[]) throws Exception
 	{
 		fileBuffer = buffer;
 		globals = openBuffer();
 		if (globals == 0)
 		{
-			throw new Exception("Failed to open buffer");
+			throw new Exception(context.getString(R.string.cannot_open_buffer));
 		}
+		file_format = fileFormatInternal();
 	}
 
 	public  int countPages()
@@ -90,6 +96,11 @@ public class MuPDFCore
 			numPages = countPagesSynchronized();
 
 		return numPages;
+	}
+
+	public String fileFormat()
+	{
+		return file_format;
 	}
 
 	private synchronized int countPagesSynchronized() {
@@ -251,6 +262,11 @@ public class MuPDFCore
 	public synchronized void addMarkupAnnotation(int page, PointF[] quadPoints, Annotation.Type type) {
 		gotoPage(page);
 		addMarkupAnnotationInternal(quadPoints, type.ordinal());
+	}
+
+	public synchronized void addInkAnnotation(int page, PointF[][] arcs) {
+		gotoPage(page);
+		addInkAnnotationInternal(arcs);
 	}
 
 	public synchronized void deleteAnnotation(int page, int annot_index) {

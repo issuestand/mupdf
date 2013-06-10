@@ -188,6 +188,31 @@ ensure_space(fz_context *ctx, unsigned int tofree)
 	return count;
 }
 
+static void
+touch(fz_store *store, fz_item *item)
+{
+	if (item->next != item)
+	{
+		/* Already in the list - unlink it */
+		if (item->next)
+			item->next->prev = item->prev;
+		else
+			store->tail = item->prev;
+		if (item->prev)
+			item->prev->next = item->next;
+		else
+			store->head = item->next;
+	}
+	/* Now relink it at the start of the LRU chain */
+	item->next = store->head;
+	if (item->next)
+		item->next->prev = item;
+	else
+		store->tail = item;
+	store->head = item;
+	item->prev = NULL;
+}
+
 void *
 fz_store_item(fz_context *ctx, void *key, void *val_, unsigned int itemsize, fz_store_type *type)
 {
@@ -197,11 +222,19 @@ fz_store_item(fz_context *ctx, void *key, void *val_, unsigned int itemsize, fz_
 	fz_store *store = ctx->store;
 	fz_store_hash hash = { NULL };
 	int use_hash = 0;
+	unsigned pos;
 
 	if (!store)
 		return NULL;
 
 	fz_var(item);
+
+	if (store->max != FZ_STORE_UNLIMITED && store->max < itemsize)
+	{
+		/* Our item would take up more room than we can ever
+		 * possibly have in the store. Just give up now. */
+		return NULL;
+	}
 
 	/* If we fail for any reason, we swallow the exception and continue.
 	 * All that the above program will see is that we failed to store
@@ -223,31 +256,20 @@ fz_store_item(fz_context *ctx, void *key, void *val_, unsigned int itemsize, fz_
 
 	type->keep_key(ctx, key);
 	fz_lock(ctx, FZ_LOCK_ALLOC);
-	if (store->max != FZ_STORE_UNLIMITED)
-	{
-		size = store->size + itemsize;
-		while (size > store->max)
-		{
-			/* ensure_space may drop, then retake the lock */
-			if (ensure_space(ctx, size - store->max) == 0)
-			{
-				/* Failed to free any space */
-				fz_unlock(ctx, FZ_LOCK_ALLOC);
-				fz_free(ctx, item);
-				type->drop_key(ctx, key);
-				return NULL;
-			}
-		}
-	}
-	store->size += itemsize;
 
+	/* Fill out the item. To start with, we always set item->next == item
+	 * and item->prev == item. This is so that we can spot items that have
+	 * been put into the hash table without having made it into the linked
+	 * list yet. */
 	item->key = key;
 	item->val = val;
 	item->size = itemsize;
-	item->next = NULL;
+	item->next = item;
+	item->prev = item;
 	item->type = type;
 
-	/* If we can index it fast, put it into the hash table */
+	/* If we can index it fast, put it into the hash table. This serves
+	 * to check whether we have one there already. */
 	if (use_hash)
 	{
 		fz_item *existing;
@@ -255,18 +277,22 @@ fz_store_item(fz_context *ctx, void *key, void *val_, unsigned int itemsize, fz_
 		fz_try(ctx)
 		{
 			/* May drop and retake the lock */
-			existing = fz_hash_insert(ctx, store->hash, &hash, item);
+			existing = fz_hash_insert_with_pos(ctx, store->hash, &hash, item, &pos);
 		}
 		fz_catch(ctx)
 		{
-			store->size -= itemsize;
+			/* Any error here means that item never made it into the
+			 * hash - so no one else can have a reference. */
 			fz_unlock(ctx, FZ_LOCK_ALLOC);
 			fz_free(ctx, item);
+			type->drop_key(ctx, key);
 			return NULL;
 		}
 		if (existing)
 		{
-			/* Take a new reference */
+			/* There was one there already! Take a new reference
+			 * to the existing one, and drop our current one. */
+			touch(store, existing);
 			if (existing->val->refs > 0)
 				existing->val->refs++;
 			fz_unlock(ctx, FZ_LOCK_ALLOC);
@@ -275,17 +301,46 @@ fz_store_item(fz_context *ctx, void *key, void *val_, unsigned int itemsize, fz_
 			return existing->val;
 		}
 	}
-	/* Now we can never fail, bump the ref */
+	/* Now bump the ref */
 	if (val->refs > 0)
 		val->refs++;
+	/* If we haven't got an infinite store, check for space within it */
+	if (store->max != FZ_STORE_UNLIMITED)
+	{
+		size = store->size + itemsize;
+		while (size > store->max)
+		{
+			/* ensure_space may drop, then retake the lock */
+			int saved = ensure_space(ctx, size - store->max);
+			if (saved == 0)
+			{
+				/* Failed to free any space. */
+				/* If we are using the hash table, then we've already
+				 * inserted item - remove it. */
+				if (use_hash)
+				{
+					/* If someone else has already picked up a reference
+					 * to item, then we cannot remove it. Leave it in the
+					 * store, and we'll live with being over budget. We
+					 * know this is the case, if it's in the linked list. */
+					if (item->next != item)
+						break;
+					fz_hash_remove_fast(ctx, store->hash, &hash, pos);
+				}
+				fz_unlock(ctx, FZ_LOCK_ALLOC);
+				fz_free(ctx, item);
+				type->drop_key(ctx, key);
+				if (val->refs > 0)
+					val->refs--;
+				return NULL;
+			}
+			size -= saved;
+		}
+	}
+	store->size += itemsize;
+
 	/* Regardless of whether it's indexed, it goes into the linked list */
-	item->next = store->head;
-	if (item->next)
-		item->next->prev = item;
-	else
-		store->tail = item;
-	store->head = item;
-	item->prev = NULL;
+	touch(store, item);
 	fz_unlock(ctx, FZ_LOCK_ALLOC);
 
 	return NULL;
@@ -328,24 +383,11 @@ fz_find_item(fz_context *ctx, fz_store_free_fn *free, void *key, fz_store_type *
 	}
 	if (item)
 	{
-		/* LRU: Move the block to the front */
-		/* Unlink from present position */
-		if (item->next)
-			item->next->prev = item->prev;
-		else
-			store->tail = item->prev;
-		if (item->prev)
-			item->prev->next = item->next;
-		else
-			store->head = item->next;
-		/* Insert at head */
-		item->next = store->head;
-		if (item->next)
-			item->next->prev = item;
-		else
-			store->tail = item;
-		item->prev = NULL;
-		store->head = item;
+		/* LRU the block. This also serves to ensure that any item
+		 * picked up from the hash before it has made it into the
+		 * linked list does not get whipped out again due to the
+		 * store being full. */
+		touch(store, item);
 		/* And bump the refcount before returning */
 		if (item->val->refs > 0)
 			item->val->refs++;
@@ -363,7 +405,7 @@ fz_remove_item(fz_context *ctx, fz_store_free_fn *free, void *key, fz_store_type
 	fz_item *item;
 	fz_store *store = ctx->store;
 	int drop;
-	fz_store_hash hash;
+	fz_store_hash hash = { NULL };
 	int use_hash = 0;
 
 	if (type->make_hash_key)
@@ -389,14 +431,20 @@ fz_remove_item(fz_context *ctx, fz_store_free_fn *free, void *key, fz_store_type
 	}
 	if (item)
 	{
-		if (item->next)
-			item->next->prev = item->prev;
-		else
-			store->tail = item->prev;
-		if (item->prev)
-			item->prev->next = item->next;
-		else
-			store->head = item->next;
+		/* Momentarily things can be in the hash table without being
+		 * in the list. Don't attempt to unlink these. We indicate
+		 * such items by setting item->next == item. */
+		if (item->next != item)
+		{
+			if (item->next)
+				item->next->prev = item->prev;
+			else
+				store->tail = item->prev;
+			if (item->prev)
+				item->prev->next = item->next;
+			else
+				store->head = item->next;
+		}
 		drop = (item->val->refs > 0 && --item->val->refs == 0);
 		fz_unlock(ctx, FZ_LOCK_ALLOC);
 		if (drop)
@@ -455,15 +503,23 @@ fz_drop_store_context(fz_context *ctx)
 }
 
 #ifndef NDEBUG
+static void
+print_item(FILE *out, void *item_)
+{
+	fz_item *item = (fz_item *)item_;
+	fprintf(out, " val=%p item=%p\n", item->val, item);
+	fflush(out);
+}
+
 void
-fz_print_store(fz_context *ctx, FILE *out)
+fz_print_store_locked(fz_context *ctx, FILE *out)
 {
 	fz_item *item, *next;
 	fz_store *store = ctx->store;
 
 	fprintf(out, "-- resource store contents --\n");
+	fflush(out);
 
-	fz_lock(ctx, FZ_LOCK_ALLOC);
 	for (item = store->head; item; item = next)
 	{
 		next = item->next;
@@ -471,12 +527,24 @@ fz_print_store(fz_context *ctx, FILE *out)
 			next->val->refs++;
 		fprintf(out, "store[*][refs=%d][size=%d] ", item->val->refs, item->size);
 		fz_unlock(ctx, FZ_LOCK_ALLOC);
-		item->type->debug(item->key);
+		item->type->debug(out, item->key);
 		fprintf(out, " = %p\n", item->val);
+		fflush(out);
 		fz_lock(ctx, FZ_LOCK_ALLOC);
 		if (next)
 			next->val->refs--;
 	}
+	fprintf(out, "-- resource store hash contents --\n");
+	fz_print_hash_details(ctx, out, store->hash, print_item);
+	fprintf(out, "-- end --\n");
+	fflush(out);
+}
+
+void
+fz_print_store(fz_context *ctx, FILE *out)
+{
+	fz_lock(ctx, FZ_LOCK_ALLOC);
+	fz_print_store_locked(ctx, out);
 	fz_unlock(ctx, FZ_LOCK_ALLOC);
 }
 #endif
@@ -525,7 +593,7 @@ int fz_store_scavenge(fz_context *ctx, unsigned int size, int *phase)
 
 #ifdef DEBUG_SCAVENGING
 	printf("Scavenging: store=%d size=%d phase=%d\n", store->size, size, *phase);
-	fz_print_store(ctx, stderr);
+	fz_print_store_locked(ctx, stderr);
 	Memento_stats();
 #endif
 	do

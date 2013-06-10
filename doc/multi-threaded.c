@@ -16,7 +16,7 @@
 // gcc -g -o build/debug/example-mt -I fitz doc/multi-threading.c \
 //	build/debug/libfitz.a build/debug/libfreetype.a \
 //	build/debug/libopenjpeg.a build/debug/libjbig2dec.a \
-//	build/debug/libjpeg.a -lpng -lm -lpthread
+//	build/debug/libjpeg.a -lpthread -lm
 //
 // build/debug/example-mt /path/to/document.pdf
 //
@@ -202,7 +202,7 @@ int main(int argc, char **argv)
 
 		// Create a white pixmap using the correct dimensions.
 
-		fz_pixmap *pix = fz_new_pixmap_with_bbox(ctx, fz_device_rgb, fz_round_rect(&rbox, &bbox));
+		fz_pixmap *pix = fz_new_pixmap_with_bbox(ctx, fz_device_rgb(ctx), fz_round_rect(&rbox, &bbox));
 		fz_clear_pixmap_with_value(ctx, pix, 0xff);
 
 		// Populate the data structure to be sent to the
